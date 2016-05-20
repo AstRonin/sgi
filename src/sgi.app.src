@@ -1,0 +1,12 @@
+{application, sgi, [
+    {description, "Socket Gateway Interface"},
+    {vsn, "1.0.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib,
+        n2o
+    ]},
+    {mod, {sgi, []}},
+    {env, []}
+]}.
