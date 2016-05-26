@@ -15,7 +15,10 @@
     {ok, pid(), State :: term()} |
     {error, Reason :: term()}).
 start(_StartType, _StartArgs) ->
-    sgi_sup:start_link().
+    sgi_sup:start_link()
+%%    ,
+%%    sgi_fcgi:init_fcgi()
+.
 
 -spec(stop(State :: term()) -> term()).
 stop(_State) ->

@@ -24,15 +24,17 @@
 
 -spec init() -> ok | {error, term()}.
 init() ->
-    case ex_fcgi:start(fcgi, wf:config(n2o_fcgi, address, localhost), wf:config(n2o_fcgi, port, ?DEF_FCGI_PORT)) of
-        {ok, _Pid} -> ok;
-        {error, {already_started, _Pid}} -> ok;
-        E -> E
-    end.
+%%    case ex_fcgi:start(fcgi, wf:config(n2o_fcgi, address, localhost), wf:config(n2o_fcgi, port, ?DEF_FCGI_PORT)) of
+%%        {ok, _Pid} -> ok;
+%%        {error, {already_started, _Pid}} -> ok;
+%%        E -> E
+%%    end
+ok.
 
 -spec stop() -> ok | {error, term()}.
 stop() ->
-    ex_fcgi:stop(fcgi).
+%%    ex_fcgi:stop(fcgi)
+ok.
 
 send() -> send(#http{}).
 
@@ -53,7 +55,7 @@ send(Http) ->
     Pid ! {4, FCGIParams},
     case has_body(Http) of true -> Pid ! {5, Body}; _ -> ok end,
     Pid ! <<>>,
-    Timer = erlang:send_after(wf:config(n2o_fcgi, timeout, ?DEF_TIMEOUT), self(), sgi_fcgi_timeout),
+    Timer = erlang:send_after(wf:config(n2o_fcgi, fcgi_timeout, ?DEF_TIMEOUT), self(), sgi_fcgi_timeout),
 
     %======================
 
@@ -397,6 +399,8 @@ stdout(Data) ->
     Data :: binary(),
     Headers :: list(),
     Body :: binary().
+decode_result(<<>>) ->
+    {ok, [], <<>>};
 decode_result(Data) -> decode_result(Data, []).
 decode_result(Data, AccH) ->
     case erlang:decode_packet(httph_bin, Data, []) of

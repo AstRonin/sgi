@@ -1,9 +1,13 @@
+%%
+%% @todo Add check active Pool Pocesses (sgi_pool), run ch_to_state each 10(for example) minutes
+%%
+
 -module(sgi_arbiter).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, alloc/0, free/1]).
+-export([start_link/0, start_link/1, ch_to_state/0, alloc/0, free/1, free_all/0, list/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -14,6 +18,8 @@
     code_change/3]).
 
 -define(SERVER, ?MODULE).
+
+-define(SUPERVISOR, sgi_sup).
 
 -define(AVAILABLE, 1).
 -define(NOTAVAILABLE, 2).
@@ -30,43 +36,72 @@
 
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(A) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [A], []).
+
+ch_to_state() ->
+    gen_server:call(?SERVER, ch_to_state).
 
 alloc() ->
-    gen_server:call(?SERVER, alloc).
+    alloc(10).
+alloc(0) ->
+    {ok, undefined};
+alloc(Count) ->
+    case gen_server:call(?SERVER, alloc) of
+        {ok, undefined} ->
+            io:format("Pid is undefined, waiting 1000 ms"),
+            timer:sleep(1000),
+            alloc(Count - 1);
+        {ok, Pid} -> {ok, Pid}
+    end.
 
 free(Pid) ->
     gen_server:cast(?SERVER, {free, Pid}).
+
+free_all() ->
+    gen_server:cast(?SERVER, free_all).
+
+list() ->
+    gen_server:call(?SERVER, list).
 
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
--spec(init(Args :: term()) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
-init([Parent]) ->
-
-    Children = supervisor:which_children(Parent),
-    ch_to_state(Children),
+init([]) ->
+    wf:info(?MODULE, "Init: ~n", []),
+    {ok, #state{}};
+init([Ch]) ->
+    wf:info(?MODULE, "Init with children: ~p~n", [Ch]),
+    ch_to_state(Ch, []),
     {ok, #state{}}.
 
 
+handle_call(ch_to_state, _From, State) ->
+    Ch = supervisor:which_children(?SUPERVISOR),
+    wf:info(?MODULE, "Children: ~p~n", [Ch]),
+    ch_to_state(Ch, []),
+    {reply, ok, State};
 handle_call(alloc, _From, State) ->
     {reply, {ok, active()}, State};
-%%handle_call({set_free, Pid}, _From, State) ->
-%%    {reply, {ok, free(Pid)}, State}.
+handle_call(list, _From, State) ->
+    {reply, {ok, get_list()}, State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 
 handle_cast({free, Pid}, State) ->
-    free(Pid),
+    free(Pid, wf:state(?PROC_LIST), []),
+    {noreply, State};
+handle_cast(free_all, State) ->
+    free_all(wf:state(?PROC_LIST), []),
     {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    wf:info(?MODULE, "Unknown Request: ~p~n", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -81,7 +116,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%ch_to_state([Ch|Children]) ->
 %%    case erlang:hd(erlang:element(4, Ch)) of
-%%        sgi_pool -> % @todo fon't forget about this module name.
+%%        sgi_pool -> % @todo don't forget about this module name.
 %%            wf:state(erlang:element(2, Ch), #proc{pid = erlang:element(2, Ch), time = erlang:system_time(seconds)});
 %%        _ -> skip
 %%    end,
@@ -89,8 +124,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%ch_to_state([]) ->
 %%    ok.
 
-ch_to_state(Ch) ->
-    ch_to_state(Ch, []).
+
+%%ch_to_state(Ch) ->
+%%    ch_to_state(Ch, []).
 ch_to_state([Ch|Children], NewList) ->
     case erlang:hd(erlang:element(4, Ch)) of
         sgi_pool -> % @todo fon't forget about this module name if will be changes of name of module.
@@ -103,37 +139,49 @@ ch_to_state([], New) ->
     wf:state(?PROC_LIST, New),
     ok.
 
+get_list() ->
+    get(?PROC_LIST).
+
 active() ->
     L = get(?PROC_LIST),
     active(L, [], undefined).
 active([H|T], L, Ret) ->
     case H#proc.status of
-        ?AVAILABLE ->
+        ?AVAILABLE when Ret == undefined ->
             R = H#proc{status = ?NOTAVAILABLE},
-            active(T, [R] ++ L, R#proc.pid);
+            active(T, L ++ [R], R#proc.pid);
         _ ->
-            active(T, [H] ++ L, Ret)
+            active(T, L ++ [H], Ret)
     end;
 active([], _, undefined) ->
-    active();
-active([], L, P) ->
+    undefined;
+active([], L, Pid) ->
     wf:state(?PROC_LIST, L),
-    P.
+    Pid.
 %%    active_nearly().
 
-free(Pid) ->
-    L = wf:state(?PROC_LIST),
-    free(Pid, L, []).
+%%free(Pid) ->
+%%    L = wf:state(?PROC_LIST),
+%%    free(Pid, L, []).
+free(undefined, _, _) ->
+    ok;
 free(Pid, [H|T], L) ->
     case Pid == H#proc.pid of
         true ->
             R = H#proc{status = ?AVAILABLE},
-            free(Pid, T, [R] ++ L);
+            free(Pid, T, L ++ [R]);
         _ ->
-            free(Pid, T, [H] ++ L)
+            free(Pid, T, L ++ [H])
     end;
 free(_, [], L) ->
     wf:state(?PROC_LIST, L).
+
+free_all([H|T], L) ->
+    R = H#proc{status = ?AVAILABLE},
+    free_all(T, L ++ [R]);
+free_all([], L) ->
+    wf:state(?PROC_LIST, L).
+
 
 %%active_nearly() ->
 %%    List = get(?PROC_LIST),

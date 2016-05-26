@@ -1,11 +1,11 @@
+-module(sgi_fcgi).
 %%===================
 %% @TODO
-%% 1. Check max connections(children) and hibernate(or close) extra processes.
-%% 2. Explode content to several parts if it bigger then FCGI_MAX_CONTENT_LEN (65535 bytes)
+%% - Understand how need
+%% - Explode content to several parts if it bigger then FCGI_MAX_CONTENT_LEN (65535 bytes)
 %%===================
 
 
--module(sgi_fcgi).
 %%-behavior(gateway_behaviour).
 -behaviour(gen_server).
 
@@ -25,7 +25,7 @@
 -define(SERVER, ?MODULE).
 
 -define(ARBITER, sgi_arbiter).
--define(CONTROLLER, sgi_fcgi_controller).
+-define(MULTIPLEXER, sgi_multiplexer).
 -define(REQUEST_ID_MAX, 65535).
 
 %% Maximum number of bytes in the content portion of a FastCGI record.
@@ -71,7 +71,14 @@
 -define(REQUEST_ID, sgi_fcgi_request_id).
 
 
--record(state, {parent, role = ?FCGI_RESPONDER, req_id, pool_pid, out = <<>>, err = <<>>}).
+-record(state, {parent :: pid(),
+                role = ?FCGI_RESPONDER :: integer(),
+                req_id :: integer(),
+                pool_pid :: pid(),
+%%                multiplexed = unknown :: string() | unknown,
+                buff = <<>> :: binary(),
+                out = <<>> :: binary(),
+                err = <<>> :: binary()}).
 
 -record(sgi_fcgi_requests, {req_id, pid, timer}).
 -record(sgi_fcgi_request_id, {req_id}).
@@ -81,29 +88,31 @@
 %%%===================================================================
 
 
-%%start_link() ->
-%%    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 start() ->
     gen_server:start(?MODULE, [], []).
-
 stop(Pid) ->
     gen_server:stop(Pid).
 
+init_fcgi() ->
+    ets:new(?REQUESTS, [public, named_table, {keypos, #sgi_fcgi_requests.req_id}]),
+    ets:new(?REQUEST_ID, [public, named_table]),
+    ets:insert(?REQUEST_ID, {req_id, 1}),
+    check_multiplex(),
+    start_multiplexer(),
+    wf:info(?MODULE, "Application evns: ~p~n", [application:get_all_env(sgi)]),
+    ok.
+
+-spec request_pid(Data :: binary()) -> pid() | undefined.
 request_pid(Data) ->
     case erlang:decode_packet(fcgi, Data, []) of
         {ok, <<?FCGI_VERSION_1, _Type, ReqId:16, _>>, _Rest} ->
             [Req] = find_req(ReqId),
             Req#sgi_fcgi_requests.pid;
-        {more, _More} -> % undefined
+        {more, More} -> % undefined
+            wf:info(?MODULE, "!!!!!!!!!!!!!!!!!!!!!!request_pid, MORE!!!!!!!!!!!!!!!!!!!!!!!!!!!: ~p~n", [More]),
             undefined
     end.
-
-init_fcgi() ->
-    ets:new(?REQUESTS, [named_table, {keypos, #sgi_fcgi_requests.req_id}]),
-    ets:new(?REQUEST_ID, [named_table]),
-    ets:insert(?REQUEST_ID, {req_id, 0}),
-    ok.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -112,85 +121,112 @@ init_fcgi() ->
 init([]) ->
     {ok, #state{}}.
 
+%%===================================
+%% Send menegmant request
+%%===================================
+handle_call(?FCGI_GET_VALUES, {From, _Tag}, State) ->
+    Params = [{<<?FCGI_MAX_CONNS>>, <<>>}, {<<?FCGI_MAX_REQS>>, <<>>}, {<<?FCGI_MPXS_CONNS>>, <<>>}],
+    Data = encode(?FCGI_GET_VALUES, 0, encode_pairs(Params)),
+    {ok, PoolPid} = ?ARBITER:alloc(),
+    {ok, Return} = sgi_pool:once(PoolPid, Data),
+    ?ARBITER:free(PoolPid),
+    State1 = State#state{parent = From, req_id = 0, pool_pid = PoolPid},
+    case decode(Return) of
+         {?FCGI_GET_VALUES_RESULT, Packet, _Rest} ->
+             Pairs = decode_pairs(Packet),
+             {reply, {ok, Pairs}, State1};
+         _ ->
+             {reply, {ok, []}, State1}
+    end;
+
+%%===================================
+%% Send data
+%%===================================
 % Send first request
 % {?FCGI_BEGIN_REQUEST, ?FCGI_RESPONDER, ?FCGI_KEEP_CONN}
-handle_call({?FCGI_BEGIN_REQUEST, Role, KeepConn}, From, State) ->
+handle_call({?FCGI_BEGIN_REQUEST, Role, KeepConn}, {From, _Tag}, State) ->
     R = req_id(),
     save_req(R),
-
     Data = encode(?FCGI_BEGIN_REQUEST, R, <<Role:16, KeepConn, 0:40>>),
-
     {ok, PoolPid} = ?ARBITER:alloc(),
-    ?CONTROLLER ! {send, Data, PoolPid},
 
-    case wf:config(sgi, multiplexed) of true -> ?ARBITER:free(PoolPid); _ -> ok end,
+    case wf:config(sgi, multiplexed) of
+        "0" -> PoolPid ! {send, Data, self()};
+        _ -> ?MULTIPLEXER ! {send, Data, PoolPid}
+    end,
 
+    case wf:config(sgi, multiplexed) of "1" -> ?ARBITER:free(PoolPid); _ -> ok end,
     State1 = State#state{parent = From, req_id = R, pool_pid = PoolPid},
     {reply, ok, State1};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 handle_cast(_Request, State) ->
     {noreply, State}.
-
 handle_info({?FCGI_PARAMS, Params}, State) ->
-    Data = encode(?FCGI_PARAMS, State#state.req_id, encode_pairs(Params)),
-    ?CONTROLLER ! {send, Data, State#state.pool_pid},
+    case wf:config(sgi, multiplexed) of
+        "0" -> State#state.pool_pid ! {send, encode(?FCGI_PARAMS, State#state.req_id, encode_pairs(Params)), self()};
+        _ -> ?MULTIPLEXER ! {send, encode(?FCGI_PARAMS, State#state.req_id, encode_pairs(Params)), State#state.pool_pid}
+    end,
     {noreply, State};
 % Send body
 handle_info({?FCGI_STDIN, Request}, State) ->
-    Data = encode(?FCGI_STDIN, State#state.req_id, Request),
-    ?CONTROLLER ! {send, Data, State#state.pool_pid},
+    case wf:config(sgi, multiplexed) of
+        "0" -> State#state.pool_pid ! {send, encode(?FCGI_STDIN, State#state.req_id, Request), self()};
+        _ -> ?MULTIPLEXER ! {send, encode(?FCGI_STDIN, State#state.req_id, Request), State#state.pool_pid}
+    end,
     {noreply, State};
 handle_info(<<>>, State) -> %% send empty string as end of request
-    Data = encode(?FCGI_STDIN, State#state.req_id, <<>>),
-    ?CONTROLLER ! {send, Data, State#state.pool_pid},
+    case wf:config(sgi, multiplexed) of
+        "0" -> State#state.pool_pid ! {send, encode(?FCGI_STDIN, State#state.req_id, <<>>), self()};
+        _ -> ?MULTIPLEXER ! {send, encode(?FCGI_STDIN, State#state.req_id, <<>>), State#state.pool_pid}
+    end,
     {noreply, State};
 handle_info(?FCGI_ABORT_REQUEST, State) ->
-    Data = encode(?FCGI_ABORT_REQUEST, State#state.req_id, <<>>),
-    ?CONTROLLER ! {send, Data, State#state.pool_pid},
-    {noreply, State};
-handle_info(?FCGI_GET_VALUES, State) ->
-    Params = [{<<?FCGI_MAX_CONNS>>, <<>>}, {<<?FCGI_MAX_REQS>>, <<>>}, {<<?FCGI_MPXS_CONNS>>, <<>>}],
-    Data = encode(?FCGI_GET_VALUES, 0, Params),
-    ?CONTROLLER ! {send, Data, State#state.pool_pid},
-    {noreply, State};
-handle_info({socket_return, Data}, State) ->
-    State1 = case decode(Data) of
-        {?FCGI_STDERR, E, Rest} ->
-            wf:info(?MODULE, "socket_return, FCGI_STDERR: ~p~n", [E]),
-            wf:info(?MODULE, "socket_return, FCGI_STDERR, Rest: ~p~n", [Rest]),
-            State#state{err = [State#state.err | stream_body(E)]};
-        {?FCGI_STDOUT, Packet, Rest} ->
-            wf:info(?MODULE, "socket_return, FCGI_STDOUT: ~p~n", [Packet]),
-            wf:info(?MODULE, "socket_return, FCGI_STDOUT, Rest: ~p~n", [Rest]),
-            State#state{out = [State#state.out | stream_body(Packet)]};
-        {?FCGI_END_REQUEST, <<AppStatus:32, ProtocolStatus, _Reserved:24>>, Rest} ->
-            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, AppStatus:~p~n, ProtocolStatus:~p~n", [AppStatus, ProtocolStatus]),
-            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, Rest:~p~n", [Rest]),
-            State#state.parent ! sgi_fcgi_return_end,
-            State;
-        more ->
-            State#state.parent ! {sgi_fcgi_return, State#state.out, State#state.err},
-            State#state{out = <<>>, err = <<>>}
+    case wf:config(sgi, multiplexed) of
+        "0" -> State#state.pool_pid ! {send, encode(?FCGI_ABORT_REQUEST, State#state.req_id, <<>>), self()};
+        _ -> ?MULTIPLEXER ! {send, encode(?FCGI_ABORT_REQUEST, State#state.req_id, <<>>), State#state.pool_pid}
     end,
+    {noreply, State};
+
+%%===================================
+%% Receive data
+%%===================================
+handle_info({socket_return, Data}, State) ->
+    State1 = decode_data(Data, State),
     {noreply, State1};
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, State) ->
-    case wf:config(sgi, multiplexed, false) of false -> ?ARBITER:free(State#state.pool_pid); _ -> ok end.
+    case wf:config(sgi, multiplexed) of "1" -> ok; _ -> ?ARBITER:free(State#state.pool_pid) end.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
-
 
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
+check_multiplex() ->
+    case wf:config(sgi, multiplexed) of
+        [] ->
+            {ok, Pid} = ?SERVER:start(),
+            {ok, Ret} = gen_server:call(Pid, ?FCGI_GET_VALUES),
+            ?SERVER:stop(Pid),
+            wf:info(?MODULE, "Ret: ~p~n", [Ret]),
+            MPXS1 = case lists:keyfind(?FCGI_MPXS_CONNS, 1, Ret) of {_, MPXS} -> MPXS; _ -> unknown end,
+            application:set_env(sgi, multiplexed, MPXS1);
+        _ -> ok
+    end.
+
+start_multiplexer() -> % we don't need multiplexer if we don't use multiplex connection
+    case wf:config(sgi, multiplexed) of
+        V when V == "1"; V == unknown ->
+            {ok, _} = sgi_sup:start_child(?MULTIPLEXER, {?MODULE, request_pid}), ok;
+        _ ->
+            ok
+    end.
 
 req_id() ->
     ets:update_counter(?REQUEST_ID, req_id, {2, 1, ?REQUEST_ID_MAX, 1}).
@@ -211,20 +247,66 @@ encode_pairs([H|T], Res) ->
 encode_pairs([], Res) ->
     Res.
 encode_pair({N, V}) ->
-    [<<encode_pair_len(N), encode_pair_len(V), N, V>>].
+    NL = encode_pair_len(N),
+    VL = encode_pair_len(V),
+    [<<NL/binary, VL/binary, N/binary, V/binary>>].
 encode_pair_len(D) ->
     case iolist_size(D) of
         L when L < 128 -> <<0:1, L:7>>;
         L1 -> <<1:1, L1:31>>
     end.
 
+decode_data(Data, State = #state{buff = B}) ->
+    case decode(<<B/binary, Data/binary>>) of
+        {?FCGI_STDERR, E, Rest} ->
+            wf:info(?MODULE, "socket_return, FCGI_STDERR: ~p~n", [E]),
+            wf:info(?MODULE, "socket_return, FCGI_STDERR, Rest: ~p~n", [Rest]),
+            State#state.parent ! {sgi_fcgi_return, <<>>, stream_body(E)},
+            decode_data(Rest, State#state{buff = <<>>});
+        {?FCGI_STDOUT, Packet, Rest} ->
+            wf:info(?MODULE, "socket_return, FCGI_STDOUT: ~p~n", [Packet]),
+            wf:info(?MODULE, "socket_return, FCGI_STDOUT, Rest: ~p~n", [Rest]),
+            State#state.parent ! {sgi_fcgi_return, stream_body(Packet), <<>>},
+            decode_data(Rest, State#state{buff = <<>>});
+        {?FCGI_DATA, Packet, Rest} ->
+            wf:info(?MODULE, "socket_return, FCGI_DATA: ~p~n", [Packet]),
+            wf:info(?MODULE, "socket_return, FCGI_DATA, Rest: ~p~n", [Rest]),
+            State#state.parent ! {sgi_fcgi_return, stream_body(Packet), <<>>},
+            decode_data(Rest, State#state{buff = <<>>});
+        {?FCGI_END_REQUEST, <<AppStatus:32, ProtocolStatus, _Reserved:24>>, Rest} ->
+            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, AppStatus:~p~n, ProtocolStatus:~p~n", [AppStatus, ProtocolStatus]),
+            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, Rest:~p~n", [Rest]),
+            State#state.parent ! sgi_fcgi_return_end,
+            decode_data(Rest, State#state{buff = <<>>});
+        more ->
+            State#state{buff = <<B/binary, Data/binary>>};
+        <<>> ->
+            State
+    end.
+
+decode(<<>>) ->
+    <<>>;
 decode(Data) ->
     case erlang:decode_packet(fcgi, Data, []) of
     {ok, <<?FCGI_VERSION_1, Type, _ReqId:16, PacketLength:16, _PaddingLength, _Reserved, Packet:PacketLength/binary>>, Rest} ->
+%%        wf:info(?MODULE, "erlang:decode_packet fcgi: ~p~n~p~n~p~n", [Type, Packet, Rest]),
         {Type, Packet, Rest};
-    {more, _More} ->
+    {more, undefined} ->
+        ok;
+    {more, More} ->
+%%        wf:info(?MODULE, "more: ~p~n", [More]),
         more
     end.
+
+decode_pairs(B) -> decode_pairs(B, []).
+decode_pairs(<<>>, Pairs) -> Pairs;
+decode_pairs(<<0:1, NL:7,  0:1, VL:7,  B/binary>>, Pairs) -> decode_pairs(NL, VL, B, Pairs);
+decode_pairs(<<1:1, NL:31, 0:1, VL:7,  B/binary>>, Pairs) -> decode_pairs(NL, VL, B, Pairs);
+decode_pairs(<<0:1, NL:7,  1:1, VL:31, B/binary>>, Pairs) -> decode_pairs(NL, VL, B, Pairs);
+decode_pairs(<<1:1, NL:31, 1:1, VL:31, B/binary>>, Pairs) -> decode_pairs(NL, VL, B, Pairs).
+decode_pairs(NL, VL, B, Pairs) ->
+    <<N:NL/binary, V:VL/binary, T/binary>> = B,
+    decode_pairs(T, [{wf:to_list(N), wf:to_list(V)} | Pairs]).
 
 stream_body(<<>>) ->
     eof;
