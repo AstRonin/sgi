@@ -11,7 +11,7 @@
 -define(DEF_RESP_STATUS, 200).
 -define(DEF_TIMEOUT, 60000).
 
--define(WS_URL_PARTS, (get(n2o_fcgi_ws_url_parts))).
+-define(WS_URL_PARTS, (get(sgi_n2o_fcgi_ws_url_parts))).
 
 -type http() :: #http{}.
 -type htuple() :: {binary(), binary()}.
@@ -24,7 +24,7 @@
 
 -spec init() -> ok | {error, term()}.
 init() ->
-%%    case ex_fcgi:start(fcgi, wf:config(n2o_fcgi, address, localhost), wf:config(n2o_fcgi, port, ?DEF_FCGI_PORT)) of
+%%    case ex_fcgi:start(fcgi, wf:config(sgi, address, localhost), wf:config(sgi, port, ?DEF_FCGI_PORT)) of
 %%        {ok, _Pid} -> ok;
 %%        {error, {already_started, _Pid}} -> ok;
 %%        E -> E
@@ -55,11 +55,11 @@ send(Http) ->
     Pid ! {4, FCGIParams},
     case has_body(Http) of true -> Pid ! {5, Body}; _ -> ok end,
     Pid ! <<>>,
-    Timer = erlang:send_after(wf:config(n2o_fcgi, fcgi_timeout, ?DEF_TIMEOUT), self(), sgi_fcgi_timeout),
+    Timer = erlang:send_after(wf:config(sgi, fcgi_timeout, ?DEF_TIMEOUT), self(), sgi_fcgi_timeout),
 
     %======================
 
-%%    {ok, Ref} = ex_fcgi:begin_request(fcgi, responder, FCGIParams, wf:config(n2o_fcgi, timeout, ?DEF_TIMEOUT)),
+%%    {ok, Ref} = ex_fcgi:begin_request(fcgi, responder, FCGIParams, wf:config(sgi, timeout, ?DEF_TIMEOUT)),
 %%    case has_body(Http) of
 %%        true -> ex_fcgi:send(fcgi, Ref, Body);
 %%        _ -> ok
@@ -76,7 +76,7 @@ send(Http) ->
     sgi_fcgi:stop(Pid),
     %======================
 
-    RetH = wf:state(n2o_fcgi_response_headers),
+    RetH = wf:state(sgi_n2o_fcgi_response_headers),
     set_header_to_cowboy(RetH, byte_size(Ret)),
     terminate(),
     %% @todo Return headers from cgi because cowboy don't give access to resp_headers
@@ -88,7 +88,7 @@ send(Http) ->
 
 -spec vhosts() -> ok.
 vhosts() ->
-    Vs = wf:config(n2o_fcgi, vhosts, []),
+    Vs = wf:config(sgi, vhosts, []),
     vhosts(Vs).
 vhosts([H|T]) ->
     S = proplists:get_value(server_name, H, ""),
@@ -131,7 +131,7 @@ get_params(Http) ->
         {<<"SCRIPT_FILENAME">>, wf:to_binary([vhost(root), FPath, "/", FScript])},
         {<<"SCRIPT_NAME">>, wf:to_binary(["/", FScript])},
         %% {<<"SERVER_ADDR">>, <<"">>}, % I don't now how cowboy return self ip
-        {<<"SERVER_NAME">>, wf:to_binary(vhost(server_name, wf:config(n2o_fcgi, address, "")))},
+        {<<"SERVER_NAME">>, wf:to_binary(vhost(server_name, wf:config(sgi, address, "")))},
         {<<"SERVER_PORT">>, wf:to_binary(port())},
         {<<"SERVER_PROTOCOL">>, ?PROTO_HTTP},
         {<<"SERVER_SOFTWARE">>, <<"cowboy">>}] ++
@@ -142,15 +142,15 @@ get_params(Http) ->
 
 -spec make_ws_url_parts(http()) -> ok.
 make_ws_url_parts(#http{url = undefined}) ->
-    wf:state(n2o_fcgi_ws_url_parts, #ws_url_parts{}), ok;
+    wf:state(sgi_n2o_fcgi_ws_url_parts, #ws_url_parts{}), ok;
 make_ws_url_parts(#http{url = Url}) ->
     case http_uri:parse(wf:to_list(Url), [{scheme_defaults, [
         {http,80},{https,443},{ftp,21},{ssh,22},{sftp,22},{tftp,69},{ws,80},{wss,443}]}]) of
         {ok, {Scheme, UserInfo, Host, Port, Path, Query}} ->
             R = #ws_url_parts{scheme=Scheme,userInfo=UserInfo,host=Host,port=Port,path=Path,query=Query},
-            wf:state(n2o_fcgi_ws_url_parts, R), ok;
+            wf:state(sgi_n2o_fcgi_ws_url_parts, R), ok;
         {error, _Reason} ->
-            wf:state(n2o_fcgi_ws_url_parts, #ws_url_parts{}), ok
+            wf:state(sgi_n2o_fcgi_ws_url_parts, #ws_url_parts{}), ok
     end.
 
 -spec external_headers(http()) -> list().
@@ -178,8 +178,8 @@ external_ajax_header() ->
 post_headers(Http) ->
     case has_body(Http) of
         true ->
-            [{"CONTENT_TYPE", <<"application/x-www-form-urlencoded">>},
-                {"CONTENT_LENGTH", wf:to_binary(body_length())}];
+            [{<<"CONTENT_TYPE">>, <<"application/x-www-form-urlencoded">>},
+                {<<"CONTENT_LENGTH">>, wf:to_binary(body_length())}];
         _ -> []
     end.
 
@@ -215,7 +215,7 @@ has_body(Http) ->
 
 -spec body_length() -> non_neg_integer().
 body_length() ->
-    case wf:state(n2o_fcgi_body_length) of
+    case wf:state(sgi_n2o_fcgi_body_length) of
         L when is_integer(L) -> L;
         _ ->
             case cowboy_req:body_length(?REQ) of
@@ -253,7 +253,7 @@ bs(#http{body = B}) when B =:= <<>> orelse B =:= "" ->
     {empty, <<>>};
 bs(#http{body = B} = Http) ->
     case has_body(Http) of
-        true -> wf:state(n2o_fcgi_body_length, byte_size(B)), {ok, B};
+        true -> wf:state(sgi_n2o_fcgi_body_length, byte_size(B)), {ok, B};
         _ -> {empty, <<>>}
     end.
 
@@ -372,8 +372,8 @@ stdout(Data) ->
     case H of
         [] -> skip;
         _ ->
-            RespH1 = case wf:state(n2o_fcgi_response_headers) of undefined -> []; RespH -> RespH end,
-            wf:state(n2o_fcgi_response_headers, RespH1 ++ H)
+            RespH1 = case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> []; RespH -> RespH end,
+            wf:state(sgi_n2o_fcgi_response_headers, RespH1 ++ H)
     end,
     Ret.
 
@@ -386,8 +386,8 @@ stdout(Data) ->
 %%    case H of
 %%        [] -> skip;
 %%        _ ->
-%%            RespH1 = case wf:state(n2o_fcgi_response_headers) of undefined -> []; RespH -> RespH end,
-%%            wf:state(n2o_fcgi_response_headers, RespH1 ++ H)
+%%            RespH1 = case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> []; RespH -> RespH end,
+%%            wf:state(sgi_n2o_fcgi_response_headers, RespH1 ++ H)
 %%    end,
 %%    stdout(Messages, <<Acc/binary, B/binary>>);
 %%stdout([{end_request, request_complete, 0}], Acc) ->
@@ -462,6 +462,6 @@ to_upper(V) ->
 
 terminate() ->
     wf:state(vhost, []),
-    wf:state(n2o_fcgi_ws_url_parts, undefined),
-    wf:state(n2o_fcgi_body_length, undefined),
-    wf:state(n2o_fcgi_response_headers, []).
+    wf:state(sgi_n2o_fcgi_ws_url_parts, undefined),
+    wf:state(sgi_n2o_fcgi_body_length, undefined),
+    wf:state(sgi_n2o_fcgi_response_headers, []).

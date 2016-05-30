@@ -46,12 +46,12 @@ alloc() ->
     alloc(10).
 alloc(0) ->
     {ok, undefined};
-alloc(Count) ->
+alloc(CountTry) ->
     case gen_server:call(?SERVER, alloc) of
         {ok, undefined} ->
             io:format("Pid is undefined, waiting 1000 ms"),
             timer:sleep(1000),
-            alloc(Count - 1);
+            alloc(CountTry - 1);
         {ok, Pid} -> {ok, Pid}
     end.
 

@@ -22,7 +22,6 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 start_link(A) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [A], []).
-
 set_callback({M,F}) ->
     gen_server:call(?SERVER, {{req_id_callback, M, F}}).
 
@@ -43,17 +42,16 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info({send, Request, PoolPid}, State) ->
-    PoolPid ! {send, Request, self()},
+    case is_pid(PoolPid) of true -> PoolPid ! {send, Request, self()}; _ -> ok end,
     {noreply, State};
 handle_info({send, Request, PoolPid, M, F}, State) ->
     State1 = State#state{req_id_callback = {M,F}},
-    PoolPid ! {send, Request, self()},
+    case is_pid(PoolPid) of true -> PoolPid ! {send, Request, self()}; _ -> ok end,
     {noreply, State1};
 handle_info({socket_return, Data}, State) ->
     {M,F} = State#state.req_id_callback,
     Pid = M:F(Data),
-%%    Pid = sgi_fcgi:request_pid(Data),
-    Pid ! {socket_return, Data},
+    case is_pid(Pid) of true -> Pid ! {socket_return, Data}; _ -> ok end,
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.

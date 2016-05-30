@@ -1,10 +1,4 @@
 -module(sgi_fcgi).
-%%===================
-%% @TODO
-%% - Understand how need
-%% - Explode content to several parts if it bigger then FCGI_MAX_CONTENT_LEN (65535 bytes)
-%%===================
-
 
 %%-behavior(gateway_behaviour).
 -behaviour(gen_server).
@@ -76,9 +70,7 @@
                 req_id :: integer(),
                 pool_pid :: pid(),
 %%                multiplexed = unknown :: string() | unknown,
-                buff = <<>> :: binary(),
-                out = <<>> :: binary(),
-                err = <<>> :: binary()}).
+                buff = <<>> :: binary()}).
 
 -record(sgi_fcgi_requests, {req_id, pid, timer}).
 -record(sgi_fcgi_request_id, {req_id}).
@@ -97,7 +89,7 @@ stop(Pid) ->
 init_fcgi() ->
     ets:new(?REQUESTS, [public, named_table, {keypos, #sgi_fcgi_requests.req_id}]),
     ets:new(?REQUEST_ID, [public, named_table]),
-    ets:insert(?REQUEST_ID, {req_id, 1}),
+    ets:insert(?REQUEST_ID, {req_id, 0}),
     check_multiplex(),
     start_multiplexer(),
     wf:info(?MODULE, "Application evns: ~p~n", [application:get_all_env(sgi)]),
@@ -110,7 +102,7 @@ request_pid(Data) ->
             [Req] = find_req(ReqId),
             Req#sgi_fcgi_requests.pid;
         {more, More} -> % undefined
-            wf:info(?MODULE, "!!!!!!!!!!!!!!!!!!!!!!request_pid, MORE!!!!!!!!!!!!!!!!!!!!!!!!!!!: ~p~n", [More]),
+            wf:error(?MODULE, "!!!!!!!!!!!!!!!!!!!!!!request_pid, exception, MORE!!!!!!!!!!!!!!!!!!!!!!!!!!!: ~p~n", [More]),
             undefined
     end.
 
@@ -121,14 +113,14 @@ request_pid(Data) ->
 init([]) ->
     {ok, #state{}}.
 
-%%===================================
-%% Send menegmant request
-%%===================================
+%%=============================================================
+%% Send management request and getting connection data of server
+%%=============================================================
 handle_call(?FCGI_GET_VALUES, {From, _Tag}, State) ->
     Params = [{<<?FCGI_MAX_CONNS>>, <<>>}, {<<?FCGI_MAX_REQS>>, <<>>}, {<<?FCGI_MPXS_CONNS>>, <<>>}],
     Data = encode(?FCGI_GET_VALUES, 0, encode_pairs(Params)),
     {ok, PoolPid} = ?ARBITER:alloc(),
-    {ok, Return} = sgi_pool:once(PoolPid, Data),
+    {ok, Return} = sgi_pool:once_call(PoolPid, Data),
     ?ARBITER:free(PoolPid),
     State1 = State#state{parent = From, req_id = 0, pool_pid = PoolPid},
     case decode(Return) of
@@ -164,7 +156,7 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 handle_info({?FCGI_PARAMS, Params}, State) ->
     case wf:config(sgi, multiplexed) of
-        "0" -> State#state.pool_pid ! {send, encode(?FCGI_PARAMS, State#state.req_id, encode_pairs(Params)), self()};
+        "0" -> State#state.pool_pid ! {send, encode(?FCGI_PARAMS, State#state.req_id, encode_pairs(Params)) ++ encode(?FCGI_PARAMS, State#state.req_id, <<>>), self()};
         _ -> ?MULTIPLEXER ! {send, encode(?FCGI_PARAMS, State#state.req_id, encode_pairs(Params)), State#state.pool_pid}
     end,
     {noreply, State};
@@ -214,7 +206,6 @@ check_multiplex() ->
             {ok, Pid} = ?SERVER:start(),
             {ok, Ret} = gen_server:call(Pid, ?FCGI_GET_VALUES),
             ?SERVER:stop(Pid),
-            wf:info(?MODULE, "Ret: ~p~n", [Ret]),
             MPXS1 = case lists:keyfind(?FCGI_MPXS_CONNS, 1, Ret) of {_, MPXS} -> MPXS; _ -> unknown end,
             application:set_env(sgi, multiplexed, MPXS1);
         _ -> ok
@@ -237,13 +228,23 @@ save_req(ReqId) ->
 find_req(ReqId) ->
     ets:lookup(?REQUESTS, ReqId).
 
+encode(Type, ReqId, Content = <<>>) ->
+    encode_add_header(Type, ReqId, Content);
 encode(Type, ReqId, Content) ->
-    [<<?FCGI_VERSION_1, Type, ReqId:16, (iolist_size(Content)):16, 0, 0>>] ++ Content.
+    encode(Type, ReqId, iolist_to_binary(Content), []).
+encode(_, _, <<>>, Bin) ->
+    lists:reverse(Bin);
+encode(Type, ReqId, <<Content:(?FCGI_MAX_CONTENT_LEN - 8)/binary, Rest/binary>>, Bin) ->
+    encode(Type, ReqId, Rest, [encode_add_header(Type, ReqId, Content) | Bin]);
+encode(Type, ReqId, Content, Bin) ->
+    encode(Type, ReqId, <<>>, [encode_add_header(Type, ReqId, Content) | Bin]).
+encode_add_header(Type, ReqId, Content) ->
+    <<?FCGI_VERSION_1, Type, ReqId:16, (iolist_size(Content)):16, 0, 0, Content/binary>>.
 
 encode_pairs(P) ->
     encode_pairs(P, []).
 encode_pairs([H|T], Res) ->
-    encode_pairs(T, [encode_pair(H) | Res]);
+    encode_pairs(T, Res ++ encode_pair(H));
 encode_pairs([], Res) ->
     Res.
 encode_pair({N, V}) ->
@@ -269,13 +270,10 @@ decode_data(Data, State = #state{buff = B}) ->
             State#state.parent ! {sgi_fcgi_return, stream_body(Packet), <<>>},
             decode_data(Rest, State#state{buff = <<>>});
         {?FCGI_DATA, Packet, Rest} ->
-            wf:info(?MODULE, "socket_return, FCGI_DATA: ~p~n", [Packet]),
-            wf:info(?MODULE, "socket_return, FCGI_DATA, Rest: ~p~n", [Rest]),
             State#state.parent ! {sgi_fcgi_return, stream_body(Packet), <<>>},
             decode_data(Rest, State#state{buff = <<>>});
-        {?FCGI_END_REQUEST, <<AppStatus:32, ProtocolStatus, _Reserved:24>>, Rest} ->
-            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, AppStatus:~p~n, ProtocolStatus:~p~n", [AppStatus, ProtocolStatus]),
-            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, Rest:~p~n", [Rest]),
+        {?FCGI_END_REQUEST, <<_AppStatus:32, _ProtocolStatus, _Reserved:24>>, Rest} ->
+%%            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, AppStatus:~p~n, ProtocolStatus:~p~n", [AppStatus, ProtocolStatus]),
             State#state.parent ! sgi_fcgi_return_end,
             decode_data(Rest, State#state{buff = <<>>});
         more ->

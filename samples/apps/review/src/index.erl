@@ -63,7 +63,7 @@ event(#http{url = _Url, method = _Method, body = _Body} = Http) ->
     wf:info(?MODULE,"Http data: ~p~n",[Http]),
     {Ret, Status, Headers} = sgi_n2o_fcgi_handler:send(Http),
     wf:info(?MODULE,"Receive data from FastCGI: ~p~n",[Ret]),
-    wf:wire("http.back('"++wf:to_list(wf:jse(Ret))++"', "++wf:to_list(Status)++", "++wf:to_list(jsone:encode(Headers))++")");
+    wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++", "++wf:to_list(jsone:encode(Headers))++")");
 
 event(Event) ->
     wf:info(?MODULE,"Event: ~p", [Event]),
@@ -73,3 +73,14 @@ loop(M) ->
     DTL = #dtl{file="message",app=review,bindings=[{user,"system"},{message,M},{color,"silver"}]},
     wf:insert_top(history, wf:jse(wf:render(DTL))),
     wf:flush().
+
+js_escape(undefined) -> [];
+js_escape(Value) when is_list(Value) -> binary_to_list(js_escape(iolist_to_binary(Value)));
+js_escape(Value) -> js_escape(Value, <<>>).
+js_escape(<<"\\", Rest/binary>>, Acc) -> js_escape(Rest, <<Acc/binary, "\\\\">>);
+js_escape(<<"\r", Rest/binary>>, Acc) -> js_escape(Rest, <<Acc/binary, "\\r">>);
+js_escape(<<"\n", Rest/binary>>, Acc) -> js_escape(Rest, <<Acc/binary, "\\n">>);
+js_escape(<<"\"", Rest/binary>>, Acc) -> js_escape(Rest, <<Acc/binary, "\\\"">>);
+js_escape(<<"'",Rest/binary>>,Acc) -> js_escape(Rest, <<Acc/binary, "\\'">>);
+js_escape(<<C, Rest/binary>>, Acc) -> js_escape(Rest, <<Acc/binary, C>>);
+js_escape(<<>>, Acc) -> Acc.
