@@ -46,35 +46,16 @@ send(Http) ->
     {_, Body} = bs(Http),
     FCGIParams = get_params(Http),
 
-    %======================
-    % new app
-    %======================
-
-    {ok, Pid} = sgi_fcgi:start(),
-    gen_server:call(Pid, {1,1,1}),
-    Pid ! {4, FCGIParams},
+    {ok, Pid} = sgi_fcgi:start(1,1),
+    sgi_fcgi:params(Pid, FCGIParams),
     case has_body(Http) of true -> Pid ! {5, Body}; _ -> ok end,
-    Pid ! <<>>,
+    sgi_fcgi:end_req(Pid),
     Timer = erlang:send_after(wf:config(sgi, fcgi_timeout, ?DEF_TIMEOUT), self(), sgi_fcgi_timeout),
-
-    %======================
-
-%%    {ok, Ref} = ex_fcgi:begin_request(fcgi, responder, FCGIParams, wf:config(sgi, timeout, ?DEF_TIMEOUT)),
-%%    case has_body(Http) of
-%%        true -> ex_fcgi:send(fcgi, Ref, Body);
-%%        _ -> ok
-%%    end,
-%%    ex_fcgi:end_request(fcgi, Ref),
-
 
     Ret = ret(),
 
-    %======================
-    % new app
-    %======================
     erlang:cancel_timer(Timer),
     sgi_fcgi:stop(Pid),
-    %======================
 
     RetH = wf:state(sgi_n2o_fcgi_response_headers),
     set_header_to_cowboy(RetH, byte_size(Ret)),

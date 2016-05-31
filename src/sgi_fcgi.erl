@@ -6,7 +6,7 @@
 %% API
 -export([request_pid/1]).
 
--export([start/0, stop/1, init_fcgi/0]).
+-export([start/0, start/2, params/2, end_req/1, stop/1, init_fcgi/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -79,12 +79,18 @@
 %%% export
 %%%===================================================================
 
-
-
 start() ->
     gen_server:start(?MODULE, [], []).
+start(Role, KeepConn) ->
+    {ok, Pid} = gen_server:start(?MODULE, [], []),
+    gen_server:call(Pid, {?FCGI_BEGIN_REQUEST, Role, KeepConn}),
+    {ok, Pid}.
 stop(Pid) ->
     gen_server:stop(Pid).
+params(Pid, P) ->
+    Pid ! {?FCGI_PARAMS, P}.
+end_req(Pid) ->
+    Pid ! <<>>.
 
 init_fcgi() ->
     ets:new(?REQUESTS, [public, named_table, {keypos, #sgi_fcgi_requests.req_id}]),
@@ -105,6 +111,8 @@ request_pid(Data) ->
             wf:error(?MODULE, "!!!!!!!!!!!!!!!!!!!!!!request_pid, exception, MORE!!!!!!!!!!!!!!!!!!!!!!!!!!!: ~p~n", [More]),
             undefined
     end.
+
+
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -183,6 +191,7 @@ handle_info(?FCGI_ABORT_REQUEST, State) ->
 %%===================================
 %% Receive data
 %%===================================
+
 handle_info({socket_return, Data}, State) ->
     State1 = decode_data(Data, State),
     {noreply, State1};
@@ -194,7 +203,6 @@ terminate(_Reason, State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
 
 %%%===================================================================
 %%% Internal functions

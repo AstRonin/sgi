@@ -45,7 +45,7 @@ handle_call({once, Request}, _From, State) ->
         {ok, State1} ->
             ok = gen_tcp:send(State1#state.socket, Request),
             {ok, B} = do_recv_once(State1),
-            State2 = close_connetion(State1),
+            State2 = close(State1),
             {reply, {ok, B}, timer(State2)};
         {error, Reason} ->
             wf:error(?MODULE, "Can't create Socket: ~p~n", [Reason]),
@@ -85,14 +85,15 @@ handle_info({tcp_error, _Socket, Reason}, State) ->
     wf:info(?MODULE, "TCP connection got ERROR: ~p with state: ~p~n", [Reason, State]),
     {noreply, timer(State#state{socket = undefined})};
 handle_info(hibernate, State) ->
-    {noreply, State, hibernate};
+    State1 = close(State),
+    {noreply, State1, hibernate};
 handle_info(Info, State) ->
     wf:error(?MODULE, "Unexpected message: ~p~n", [Info]),
     {noreply, timer(State)}.
 
 
 terminate(_Reason, State) ->
-    close_connetion(State),
+    close(State),
     ok.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -105,7 +106,7 @@ connect(State) -> connect(State, once).
 
 -spec connect(#state{}, tcp_active_type()) -> {ok, State :: #state{}} | {error, Reason :: term()}.
 connect(State = #state{socket = undefined, address = Address, port = Port}, Active) ->
-    case gen_tcp:connect(Address, Port, [binary, {active, Active}]) of
+    case gen_tcp:connect(Address, Port, [binary, {active, Active}], wf:config(sgi, timeout, 60000)) of
         {ok, Socket} ->
             State1 = State#state{socket = Socket},
             wf:info(?MODULE, "TCP connect socket: ~p~n", [Socket]),
@@ -120,7 +121,7 @@ connect(State = #state{socket = Socket}, Active) ->
         _ -> {ok, State}
     end.
 
-close_connetion(State) when State#state.socket /= undefined ->
+close(State) when State#state.socket /= undefined ->
     gen_tcp:close(State#state.socket),
     State#state{socket = undefined}.
 
