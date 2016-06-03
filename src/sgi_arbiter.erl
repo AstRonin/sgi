@@ -43,13 +43,13 @@ ch_to_state() ->
     gen_server:call(?SERVER, ch_to_state).
 
 alloc() ->
-    alloc(10).
+    alloc(20).
 alloc(0) ->
     {ok, undefined};
 alloc(CountTry) ->
     case gen_server:call(?SERVER, alloc) of
         {ok, undefined} ->
-            io:format("Pid is undefined, waiting 1000 ms"),
+            wf:error(?MODULE, "Pid is undefined, waiting 1000 ms ~n", []),
             timer:sleep(1000),
             alloc(CountTry - 1);
         {ok, Pid} -> {ok, Pid}

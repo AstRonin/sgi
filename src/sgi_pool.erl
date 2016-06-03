@@ -123,7 +123,8 @@ connect(State = #state{socket = Socket}, Active) ->
 
 close(State) when State#state.socket /= undefined ->
     gen_tcp:close(State#state.socket),
-    State#state{socket = undefined}.
+    State#state{socket = undefined};
+close(State) -> State.
 
 do_recv_once(State) ->
     case gen_tcp:recv(State#state.socket, 0) of

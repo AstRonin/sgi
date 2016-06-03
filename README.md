@@ -107,7 +107,12 @@ Stop fcgi process with the release of resources
 ```erlang
 sgi_fcgi:stop(Pid),
 ```
-
+Receive message with next tags
+```erlang
+{sgi_fcgi_return, Out, Err}
+sgi_fcgi_return_end
+sgi_fcgi_timeout % self timeout
+```
 
 ### Connection Part
 

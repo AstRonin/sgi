@@ -17,6 +17,7 @@
 -type htuple() :: {binary(), binary()}.
 
 -record(ws_url_parts, {scheme, userInfo, host, port, path, query}).
+-record(response_headers, {buff = [], ended = false}).
 
 %% ===========================================================
 %% API
@@ -24,17 +25,11 @@
 
 -spec init() -> ok | {error, term()}.
 init() ->
-%%    case ex_fcgi:start(fcgi, wf:config(sgi, address, localhost), wf:config(sgi, port, ?DEF_FCGI_PORT)) of
-%%        {ok, _Pid} -> ok;
-%%        {error, {already_started, _Pid}} -> ok;
-%%        E -> E
-%%    end
-ok.
+    ok.
 
 -spec stop() -> ok | {error, term()}.
 stop() ->
-%%    ex_fcgi:stop(fcgi)
-ok.
+    ok.
 
 send() -> send(#http{}).
 
@@ -46,22 +41,25 @@ send(Http) ->
     {_, Body} = bs(Http),
     FCGIParams = get_params(Http),
 
+%%    wf:info(?MODULE, "FCGIParams:~p~n", [FCGIParams]),
+
     {ok, Pid} = sgi_fcgi:start(1,1),
     sgi_fcgi:params(Pid, FCGIParams),
     case has_body(Http) of true -> Pid ! {5, Body}; _ -> ok end,
     sgi_fcgi:end_req(Pid),
-    Timer = erlang:send_after(wf:config(sgi, fcgi_timeout, ?DEF_TIMEOUT), self(), sgi_fcgi_timeout),
+    Timer = erlang:send_after(wf:config(sgi, fcgi_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
 
     Ret = ret(),
 
     erlang:cancel_timer(Timer),
     sgi_fcgi:stop(Pid),
 
-    RetH = wf:state(sgi_n2o_fcgi_response_headers),
-    set_header_to_cowboy(RetH, byte_size(Ret)),
+    RetH = get_response_headers(),
+    set_header_to_cowboy(RetH, 0),
     terminate(),
     %% @todo Return headers from cgi because cowboy don't give access to resp_headers
     {Ret, wf:state(status), RetH}.
+%%    {iolist_to_binary(Ret), wf:state(status), RetH}.
 
 %% ===========================================================
 %% Prepare Request
@@ -332,49 +330,44 @@ rewrite(Subject, []) ->
 %% Response
 %% ===========================================================
 
--spec ret() -> binary().
+-spec ret() -> iolist().
 ret() ->
     receive
         {sgi_fcgi_return, Out, _Err} ->
             stdout(Out);
         sgi_fcgi_return_end ->
-            <<>>;
-        sgi_fcgi_timeout ->
+            [];
+        {sgi_fcgi_timeout, Pid} ->
+            sgi_fcgi:stop(Pid),
             wf:error(?MODULE, "Connect timeout to FastCGI ~n", []),
             set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
             wf:state(status, 503),
-            <<>>
+            []
     end.
 
--spec stdout(list()) -> binary().
+-spec stdout(list()) -> iolist().
 stdout(Data) ->
-    {ok, H, B} = decode_result(Data),
-    Ret = <<B/binary, (ret())/binary>>,
-    case H of
-        [] -> skip;
-        _ ->
-            RespH1 = case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> []; RespH -> RespH end,
-            wf:state(sgi_n2o_fcgi_response_headers, RespH1 ++ H)
-    end,
-    Ret.
+    case get_response_headers_ended() of
+        true -> [Data | ret()];
+    _ ->
+        {ok, Hs, B} = decode_result(Data),
+            Ret = [B | ret()],
+            case Hs of [] -> skip; _ -> update_response_headers(Hs) end,
+            Ret
+    end
+.
 
-%%-spec stdout(list()) -> binary().
-%%stdout(Messages) -> stdout(Messages, <<>>).
-%%stdout([{stderr, _Bin} | Messages], Acc) ->
-%%    stdout(Messages, Acc);
-%%stdout([{stdout, Bin} | Messages], Acc) ->
-%%    {ok, H, B} = decode_result(Bin),
-%%    case H of
-%%        [] -> skip;
-%%        _ ->
-%%            RespH1 = case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> []; RespH -> RespH end,
-%%            wf:state(sgi_n2o_fcgi_response_headers, RespH1 ++ H)
-%%    end,
-%%    stdout(Messages, <<Acc/binary, B/binary>>);
-%%stdout([{end_request, request_complete, 0}], Acc) ->
-%%    Acc;
-%%stdout([], Acc) ->
-%%    <<Acc/binary, (ret())/binary>>.
+update_response_headers(Hs) ->
+    update_response_headers(Hs, false).
+update_response_headers(Hs, Status) ->
+    RespH1 = case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> #response_headers{}; RespH -> RespH end,
+    Status1 = case RespH1#response_headers.ended of true -> true; _ -> Status end,
+    RespH2 = RespH1#response_headers{buff = lists:append([Hs, RespH1#response_headers.buff]), ended = Status1},
+    wf:state(sgi_n2o_fcgi_response_headers, RespH2).
+get_response_headers() ->
+    case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> []; H -> lists:reverse(H#response_headers.buff) end.
+get_response_headers_ended() ->
+    case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> false; H -> H#response_headers.ended end.
 
 -spec decode_result(Data) -> {ok, Headers, Body} | {error, term()} when
     Data :: binary(),
@@ -385,13 +378,15 @@ decode_result(<<>>) ->
 decode_result(Data) -> decode_result(Data, []).
 decode_result(Data, AccH) ->
     case erlang:decode_packet(httph_bin, Data, []) of
-        {ok, http_eoh, Rest} -> {ok, AccH, Rest};
+        {ok, http_eoh, Rest} ->
+            update_response_headers([], true),
+            {ok, AccH, Rest};
         {ok, {http_header,_,<<"X-CGI-",_NameRest>>,_,_Value}, Rest} -> decode_result(Rest, AccH);
-        {ok, {http_header,_Len,Field,_,Value}, Rest} -> decode_result(Rest, AccH++[{wf:to_binary(Field),Value}]);
-        {ok, {http_error,_Value}, _Rest} -> {ok, [], Data};
-        {more, undefined} -> {ok, [], Data}; % decode_packet cannot parsed <<"\n">>
-        {more, _} -> decode_result(Data, []); % try again
-        {error, R} -> wf:error(?MODULE, "decode_result error: ~p~n", [R]), {error, R}
+        {ok, {http_header,_Len,Field,_,Value}, Rest} -> decode_result(Rest, [{wf:to_binary(Field),Value} | AccH]);
+        {ok, {http_error,_Value}, _Rest} -> {ok, AccH, Data};
+        {more, undefined} -> {ok, AccH, Data};
+        {more, _} -> {ok, [], Data};
+        {error, R} -> {error, R}
     end.
 
 set_header_to_cowboy(Hs, _Len) ->
@@ -445,4 +440,4 @@ terminate() ->
     wf:state(vhost, []),
     wf:state(sgi_n2o_fcgi_ws_url_parts, undefined),
     wf:state(sgi_n2o_fcgi_body_length, undefined),
-    wf:state(sgi_n2o_fcgi_response_headers, []).
+    wf:state(sgi_n2o_fcgi_response_headers, #response_headers{}).
