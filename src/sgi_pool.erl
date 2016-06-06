@@ -8,7 +8,7 @@
 %% gen_server callbacks
 -export([init/1,
     handle_call/3,
-%%    handle_cast/2,
+    handle_cast/2,
     handle_info/2,
     terminate/2,
     code_change/3]).
@@ -54,8 +54,8 @@ handle_call({once, Request}, _From, State) ->
 %%handle_call(_Request, _From, State) ->
 %%    {reply, ok, State}.
 
-%%handle_cast(_Request, State) ->
-%%    {noreply, State}.
+handle_cast(_Request, State) ->
+    {noreply, State}.
 
 handle_info({send, Request, From}, State) ->
     State1 = State#state{parent = From},
@@ -91,7 +91,6 @@ handle_info(Info, State) ->
     wf:error(?MODULE, "Unexpected message: ~p~n", [Info]),
     {noreply, timer(State)}.
 
-
 terminate(_Reason, State) ->
     close(State),
     ok.
@@ -106,7 +105,7 @@ connect(State) -> connect(State, once).
 
 -spec connect(#state{}, tcp_active_type()) -> {ok, State :: #state{}} | {error, Reason :: term()}.
 connect(State = #state{socket = undefined, address = Address, port = Port}, Active) ->
-    case gen_tcp:connect(Address, Port, [binary, {active, Active}], wf:config(sgi, timeout, 60000)) of
+    case gen_tcp:connect(Address, Port, [binary, {active, Active}], wf:config(sgi, timeout, 30000)) of
         {ok, Socket} ->
             State1 = State#state{socket = Socket},
             wf:info(?MODULE, "TCP connect socket: ~p~n", [Socket]),

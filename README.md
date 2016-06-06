@@ -18,11 +18,13 @@ Run php as fcgi server
 
 Now you can try it out: http://localhost:8000
 
-## Basic usage of FastCGI protocol with N2O
+## 1. Basic usage
+
+Use FastCGI protocol with N2O.
 
 Add deps to rebar.config:
 ```erlang
-{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "master"}}}
+{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.1"}}}
 ```
 Add initialization of fcgi protocol:
 ```erlang
@@ -67,7 +69,9 @@ wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++",
     ]}
 ```
 
-## Advanced usage 
+
+
+## 2. Advanced usage 
 
 Application consists two parts: Protocol Part and Connection Part.
 

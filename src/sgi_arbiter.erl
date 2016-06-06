@@ -169,12 +169,12 @@ free(Pid, [H|T], L) ->
     case Pid == H#proc.pid of
         true ->
             R = H#proc{status = ?AVAILABLE},
-            free(Pid, T, L ++ [R]);
+            free(Pid, T, [R|L]);
         _ ->
-            free(Pid, T, L ++ [H])
+            free(Pid, T, [H|L])
     end;
 free(_, [], L) ->
-    wf:state(?PROC_LIST, L).
+    wf:state(?PROC_LIST, lists:reverse(L)).
 
 free_all([H|T], L) ->
     R = H#proc{status = ?AVAILABLE},
