@@ -83,8 +83,10 @@ start() ->
     gen_server:start(?MODULE, [], []).
 start(Role, KeepConn) ->
     {ok, Pid} = gen_server:start(?MODULE, [], []),
-    gen_server:call(Pid, {?FCGI_BEGIN_REQUEST, Role, KeepConn}),
-    {ok, Pid}.
+    case gen_server:call(Pid, {?FCGI_BEGIN_REQUEST, Role, KeepConn}, 60000) of
+        ok -> {ok, Pid};
+        {error, Reason} -> {error, Reason, Pid}
+    end.
 stop(Pid) ->
     gen_server:stop(Pid).
 params(Pid, P) ->
@@ -133,22 +135,26 @@ init([]) ->
 handle_call(?FCGI_GET_VALUES, {From, _Tag}, State) ->
     Params = [{<<?FCGI_MAX_CONNS>>, <<>>}, {<<?FCGI_MAX_REQS>>, <<>>}, {<<?FCGI_MPXS_CONNS>>, <<>>}],
     Data = encode(?FCGI_GET_VALUES, 0, encode_pairs(Params)),
-    {ok, PoolPid} = ?ARBITER:alloc(),
-    RetData =
-    case sgi_pool:once_call(PoolPid, Data) of
-        {ok, Return} -> Return;
-        {error, Reason} ->
-            wf:error(?MODULE, "Request return error: ~p~n", [Reason]),
-            <<>>
-    end,
-    ?ARBITER:free(PoolPid),
-    State1 = State#state{parent = From, req_id = 0, pool_pid = PoolPid},
-    case decode(RetData) of
-         {?FCGI_GET_VALUES_RESULT, Packet, _Rest} ->
-             Pairs = decode_pairs(Packet),
-             {reply, {ok, Pairs}, State1};
-         _ ->
-             {reply, {ok, []}, State1}
+    case ?ARBITER:alloc() of
+        {ok, PoolPid} ->
+            RetData =
+            case sgi_pool:once_call(PoolPid, Data) of
+                {ok, Return} -> Return;
+                {error, Reason} ->
+                    wf:error(?MODULE, "Request return error: ~p~n", [Reason]),
+                    <<>>
+            end,
+            ?ARBITER:free(PoolPid),
+            State1 = State#state{parent = From, req_id = 0, pool_pid = PoolPid},
+            case decode(RetData) of
+                {?FCGI_GET_VALUES_RESULT, Packet, _Rest} ->
+                    Pairs = decode_pairs(Packet),
+                    {reply, {ok, Pairs}, State1};
+                _ ->
+                    {reply, {ok, []}, State1}
+            end;
+        {error, _Reason} ->
+            {reply, {ok, []}, State}
     end;
 
 %%===================================
@@ -157,17 +163,21 @@ handle_call(?FCGI_GET_VALUES, {From, _Tag}, State) ->
 % Send first request
 % {?FCGI_BEGIN_REQUEST, ?FCGI_RESPONDER, ?FCGI_KEEP_CONN}
 handle_call({?FCGI_BEGIN_REQUEST, Role, KeepConn}, {From, _Tag}, State) ->
-    R = req_id(),
-    save_req(R),
-    Data = encode(?FCGI_BEGIN_REQUEST, R, <<Role:16, KeepConn, 0:40>>),
-    {ok, PoolPid} = ?ARBITER:alloc(),
-    case wf:config(sgi, multiplexed) of
-        "0" -> PoolPid ! {send, Data, self()};
-        _ -> ?MULTIPLEXER ! {send, Data, PoolPid}
-    end,
-    case wf:config(sgi, multiplexed) of "1" -> ?ARBITER:free(PoolPid); _ -> ok end,
-    State1 = State#state{parent = From, req_id = R, pool_pid = PoolPid},
-    {reply, ok, State1};
+    case ?ARBITER:alloc() of
+        {ok, PoolPid} ->
+            R = req_id(),
+            save_req(R),
+            Data = encode(?FCGI_BEGIN_REQUEST, R, <<Role:16, KeepConn, 0:40>>),
+            case wf:config(sgi, multiplexed) of
+                "0" -> PoolPid ! {send, Data, self()};
+                _ -> ?MULTIPLEXER ! {send, Data, PoolPid}
+            end,
+            case wf:config(sgi, multiplexed) of "1" -> ?ARBITER:free(PoolPid); _ -> ok end,
+            State1 = State#state{parent = From, req_id = R, pool_pid = PoolPid},
+            {reply, ok, State1};
+        {error, Reason} ->
+            {reply, {error, Reason}, State}
+    end;
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 handle_cast(_Request, State) ->
@@ -207,6 +217,9 @@ handle_info(?FCGI_ABORT_REQUEST, State) ->
 handle_info({socket_return, Data}, State) ->
     State1 = back(Data, State),
     {noreply, State1};
+handle_info({socket_error, Data}, State) ->
+    State#state.parent ! {sgi_fcgi_return_error, Data},
+    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 

@@ -40,13 +40,22 @@ init([]) ->
 %%% Internal functions
 %%%===================================================================
 
+-spec make_pool_spec() -> list().
 make_pool_spec() ->
-    make_pool_spec(wf:config(sgi, max_connections, 1), []).
-make_pool_spec(0, L) ->
+    Conf = wf:config(sgi, servers),
+    make_pool_spec(Conf, []).
+
+make_pool_spec([], New) ->
+    New;
+make_pool_spec([H|T], L) ->
+    P = make_pool_spec(proplists:get_value(max_connections,H,1), H, []),
+    make_pool_spec(T, L ++ P).
+
+make_pool_spec(0, _, L) ->
     L;
-make_pool_spec(Num, L) ->
-    N = wf:to_atom("Pool#" ++ wf:to_list(Num)),
-    PoolTmp = #{start => {sgi_pool, start_link, [N]}},
+make_pool_spec(Num, Conf, L) ->
+    N = wf:to_atom("Pool#" ++ wf:to_list(proplists:get_value(name,Conf,default)) ++ "," ++ wf:to_list(Num)),
+    PoolTmp = #{start => {sgi_pool, start_link, [N, Conf]}},
     M = maps:put(id, N, PoolTmp),
-    make_pool_spec(Num - 1, [M|L]).
+    make_pool_spec(Num - 1, Conf, [M|L]).
 
