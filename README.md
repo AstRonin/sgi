@@ -6,6 +6,7 @@ SGI give possibility simple and smart way to connect to any server by [TCP](http
 and have other protocols working under TCP, first of all this is [FastCGI](https://en.wikipedia.org/wiki/FastCGI).
 
 ## Try Sample
+### Sample 1
 It based on the sample from n2o.
 
     $ git clone git://github.com/astronin/sgi
@@ -24,7 +25,7 @@ Use FastCGI protocol with N2O.
 
 Add deps to rebar.config:
 ```erlang
-{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.1"}}}
+{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.2.0"}}}
 ```
 Add initialization of fcgi protocol:
 ```erlang
@@ -44,12 +45,16 @@ wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++",
 ```
 
 #### Configuration
+Add follow section to sys.config
 ```erlang
-{sgi, [{port, 9000}, % set port to FastCGI
-    {address, localhost},
-    {timeout, 60000}, % 1 minute
+{sgi, [
+    {servers, [
+         [{name, default}, {address, localhost}, {port, 9000}, {timeout, 60000}, {weight, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}], % failed_timeout in seconds
+         [{name, aaa},    {address, localhost}, {port, 9001}, {timeout, 60000}, {weight, 10}, {max_connections, 4}, {max_fails, 5}, {failed_timeout, 60}]
+    ]},
+        % max_connections - run N processes with 1 connection on each process. Count cannot be bigger then children of fcgi processes
+    {balancing_method, priority}, % priority | blurred, priority is default
     {fcgi_timeout, 60000}, % 1 minute
-    {max_connections, 10}, % run N processes with 1 connection on each process
     {multiplexed, unknown}, % can be "1" | "0" | unknown
     {vhosts, [
         [
@@ -69,41 +74,61 @@ wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++",
     ]}
 ```
 
+- `servers` - Balancing settings
+    - `name` - some name of server, can be any string ('default' is default name)
+    - `address` - ip, hostname or localhost(default)
+    - `port` - the port number (9000 is default port)
+    - `timeout` - connection timeout to server (60000 is default number)
+    - `weight` - the weight of the server, using for balancing (default - 1)
+    - `max_connections` - number of max connections to a server(default - 1)
+    - `max_fails` - the number of unsuccessful attempts to connect to a server (default - 10)
+    - `failed_timeout` - the number in seconds after which a connection will try reuse
+- `balancing_method` - set the method for balancing, can be **priority** or **blurred**. 
+    Method  **priority** based on **weight** of server and send data, firstly, 
+    on the connections of this server. The connections of first server 
+    in configuration will be in begin of queue, if a weight of servers will equal.
+    Unlike the previous method **blurred** distribute the connections 
+    alternately, first connection - from first server in configuration.
+    Priority method use the connections of one server at first, then it 
+    use following servers. Last servers in a queue could be not used with 
+    low intensity of requests.
+    Blurred method uses all servers but without potential overload one of a server.
+- `vhosts` - part of fastcgi
 
 
 ## 2. Advanced usage 
 
-Application consists two parts: Protocol Part and Connection Part.
+Application consists two parts: **Protocol Part** and **Connection Part**.
 
-Protocol Part works under TCP connection. For now it included FastCGI implementation.
-Connection Part is responsible of forwarding message to server.
+- Protocol Part - works under TCP connection. For now it included FastCGI implementation.
+- Connection Part - is responsible of forwarding a message to a server.
 
 ### Protocol Part:
 
 #### FastCGI
-Implementation of protocol include N2O handler and protocol module. 
+The implementation of protocol include two modules: **N2O handler** and **protocol module**.
 Other handlers can be written for other frameworks or servers.
 
-##### N2O FastCGI Handler
+##### Using N2O FastCGI Handler
 
 @See **Basic usage...**
 
-#### FastCGI Protocol
+##### Using FastCGI Protocol
 Module runnable as a process.
 
 Start new fcgi process and start connection with fcgi server
 ```erlang
 {ok, Pid} = sgi_fcgi:start(1,1), % FCGI_RESPONDER, FCGI_KEEP_CONN
 ```
-Send Params to server
+Send Params to server, this is pair of `{Key,Value}`
 ```erlang 
 sgi_fcgi:params(Pid, FCGIParams),
 ```
-Send data to server
+Send data to a server, using real Pid so without excessive copying
 ```erlang
 Pid ! {5, Body},
 ```
-Send marker that the request is ended
+Send the marker that the request is ended
 ```erlang
 sgi_fcgi:end_req(Pid),
 ```
@@ -113,15 +138,22 @@ sgi_fcgi:stop(Pid),
 ```
 Receive message with next tags
 ```erlang
-{sgi_fcgi_return, Out, Err}
-sgi_fcgi_return_end
-sgi_fcgi_timeout % self timeout
+{sgi_fcgi_return, Out, Err} % common respones
+```
+```erlang
+sgi_fcgi_return_end % end of the requet, we can retun the answer to a browser
+```
+```erlang
+{sgi_fcgi_return_error, Err} % some error
+```
+```erlang
+{sgi_fcgi_timeout, Pid} % self timeout
 ```
 
 ### Connection Part
 
 #### Arbiter
-Arbiter decide which stream is free (available), keeps busy socket,
+Arbiter decide which stream is free (available), keeps busy socket(process),
 and it does not allow the use of extra resources.
 
 #### Multiplexer
@@ -139,19 +171,27 @@ Set callback after start process `sgi_multiplexer:set_callback({M, F})` or
 set callback to each request `{send, Request, PoolPid, M, F}`.
 
 ##### Using
-To search a free stream and hold found:
+To search a free stream and hold found
 ```erlang
 {ok, PoolPid} = sgi_arbiter:alloc(),
 ```
-Send data with multiplexer:
+Send data with multiplexer
 ```erlang
 sgi_multiplexer ! {send, Data, PoolPid},
 ```
-Or Send data without multiplexer:
+or Send data without multiplexer
 ```erlang
 PoolPid ! {send, Data, self()},
 ```
-To free the held stream:
+Receive data from sockets, normal respones
+```erlang
+handle_info({socket_return, Data}, State)
+```
+or was some error with connecting or sending a message
+```erlang
+handle_info({socket_error, Data}, State)
+```
+To free the held stream
 ```erlang
 sgi_arbiter:free(PoolPid),
 ```

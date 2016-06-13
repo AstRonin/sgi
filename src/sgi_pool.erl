@@ -95,6 +95,7 @@ handle_info({send, Request, From}, State) ->
 %%                    wf:info(?MODULE, "TCP SEND to: ~p, Request: ~p~n", [State2#state.socket, Request]),
                     {noreply, timer(State2)};
                 {error, Reason1} ->
+                    State2#state.parent ! {socket_error, Reason1},
                     wf:error(?MODULE, "Pool cannot send message: ~p~n", [Reason1]),
                     {noreply, timer(State2)}
             end;
