@@ -25,7 +25,7 @@ Use FastCGI protocol with N2O.
 
 Add deps to rebar.config:
 ```erlang
-{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.2.0"}}}
+{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.2"}}}
 ```
 Add initialization of fcgi protocol:
 ```erlang
