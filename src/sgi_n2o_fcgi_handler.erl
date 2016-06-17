@@ -78,8 +78,8 @@ vhosts() ->
     Vs = wf:config(sgi, vhosts, []),
     vhosts(Vs).
 vhosts([H|T]) ->
-    S = proplists:get_value(server_name, H, ""),
-    A = proplists:get_value(aliase, H, ""),
+    S = sgi:pv(server_name, H, ""),
+    A = sgi:pv(aliase, H, ""),
     case wf:to_list(host()) of
         Host when Host =:= S orelse Host =:= A ->
             wf:state(vhost, H), ok;
@@ -92,7 +92,7 @@ vhosts([]) -> wf:state(vhost, []), ok.
 vhost(Key) -> vhost(Key, "").
 -spec vhost(atom(), []) -> term().
 vhost(Key, Def) ->
-    proplists:get_value(Key, wf:state(vhost), Def).
+    sgi:pv(Key, wf:state(vhost), Def).
 
 -spec get_params(http()) -> list().
 get_params(Http) ->

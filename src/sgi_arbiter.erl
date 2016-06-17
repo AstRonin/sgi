@@ -7,7 +7,15 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, start_link/1, ch_to_state/0, alloc/0, free/1, free_all/0, list/0, down/2]).
+-export([start_link/0,
+    start_link/1,
+    alloc/0,
+    free/1,
+    new_pool_started/1,
+    free_all/0,
+    list/0,
+    map/0,
+    down/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -26,9 +34,12 @@
 -define(DOWN, 3).
 
 -define(PROC_LIST, proc_list).
+-define(PROC_MAP, proc_map).
+-define(PROC_BY_SERVER, proc_by_server).
+
 -define(PROC_ORDER_NUM, proc_order_num).
 
--record(state, {}).
+-record(state, {adding_new_pool = 0}).
 -record(proc, {pid, weight = 1, server_name, status = ?AVAILABLE, time_created = 0, failed_out = 0}).
 
 %%%===================================================================
@@ -40,9 +51,6 @@ start_link() ->
 start_link(A) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [A], []).
 
-ch_to_state() ->
-    gen_server:call(?SERVER, ch_to_state).
-
 alloc() ->
     alloc(10).
 alloc(0) ->
@@ -50,7 +58,7 @@ alloc(0) ->
 alloc(CountTry) ->
     case gen_server:call(?SERVER, alloc) of
         {ok, undefined} ->
-            wf:error(?MODULE, "Pid is undefined, waiting 1000 ms ~n", []),
+%%            wf:error(?MODULE, "Pid is undefined, waiting 1000 ms ~n", []),
             timer:sleep(1000),
             alloc(CountTry - 1);
         {ok, Pid} -> {ok, Pid}
@@ -59,11 +67,16 @@ alloc(CountTry) ->
 free(Pid) ->
     gen_server:cast(?SERVER, {free, Pid}).
 
+new_pool_started(Pid) ->
+    gen_server:cast(?SERVER, {new_pool_started, Pid}).
+
 free_all() ->
     gen_server:cast(?SERVER, free_all).
 
 list() ->
     gen_server:call(?SERVER, list).
+map() ->
+    gen_server:call(?SERVER, map).
 
 down(Pid, FailedTimeout) ->
     gen_server:cast(?SERVER, {down, Pid, FailedTimeout}).
@@ -76,37 +89,61 @@ down(Pid, FailedTimeout) ->
 init([]) ->
     {ok, #state{}};
 init([Ch]) ->
-    wf:info(?MODULE, "Init with children: ~p~n", [Ch]),
-    ch_to_state(Ch),
-    wf:info(?MODULE, "Processes: ~p~n", [wf:state(?PROC_LIST)]),
-    {ok, #state{}}.
+    self() ! ch_to_state,
+    {ok, #state{adding_new_pool = 1}}.
 
 
-handle_call(ch_to_state, _From, State) ->
-    Ch = supervisor:which_children(?SUPERVISOR),
-    ch_to_state(Ch, []),
-    {reply, ok, State};
 handle_call(alloc, _From, State) ->
-    {reply, {ok, active()}, State};
+    V = case active() of
+        undefined ->
+            self() ! add_pool,
+            undefined;
+        Pid -> Pid
+    end,
+    {reply, {ok, V}, State};
 handle_call(list, _From, State) ->
-    {reply, {ok, get_list()}, State};
+    {reply, get_list(), State};
+handle_call(map, _From, State) ->
+    {reply, get_map(), State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 
+
 handle_cast({down, Pid, FailedTimeout}, State) ->
-    wf:info(?MODULE, "Pool worker is down: ~p~n", [Pid]),
-    down({Pid, FailedTimeout}),
+%%    wf:info(?MODULE, "Pool worker is down: ~p~n", [Pid]),
+    down1(Pid, FailedTimeout),
     {noreply, State};
 handle_cast({free, Pid}, State) ->
-    free(Pid, wf:state(?PROC_LIST)),
+    free1(Pid),
+    {noreply, State};
+handle_cast({new_pool_started, Pid}, State) ->
+    new_pool_started(Pid, State),
     {noreply, State};
 handle_cast(free_all, State) ->
-    free_all(wf:state(?PROC_LIST), []),
+    free_all1(),
     {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+handle_info(add_pool, State) ->
+    State1 = case State#state.adding_new_pool of
+        0 ->
+            case add_pool() of
+                AddedNum when AddedNum > 0 ->
+                    erlang:send_after(1000, self(), ch_to_state),
+                    State#state{adding_new_pool = 1};
+                _ ->
+                    State
+            end;
+        _ ->
+            State
+    end,
+    {noreply, State1};
+handle_info(ch_to_state, State) ->
+    Ch = supervisor:which_children(?SUPERVISOR),
+    ch_to_state(Ch),
+    {noreply, State#state{adding_new_pool = 0}};
 handle_info(Info, State) ->
     wf:info(?MODULE, "Unknown Request: ~p~n", [Info]),
     {noreply, State}.
@@ -121,19 +158,37 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+add_pool() ->
+    S = wf:state(?PROC_BY_SERVER),
+    add_pool(maps:values(S), 0).
+add_pool([H|T], AddedNum) ->
+    Sett = maps:get(settings, H, #{}),
+    Max = maps:get(max_connections, Sett, 1),
+    Len = length(maps:get(processes, H, [])),
+    AddedNum1 = AddedNum + case Len < Max of
+        true ->
+            Num = increase_pool_count(Len, Max),
+            spawn(fun() -> sgi_sup:start_pool_children(Num, maps:to_list(Sett)) end),
+            Num;
+        _ ->
+            0
+    end,
+    add_pool(T, AddedNum1);
+add_pool([], AddedNum) -> AddedNum.
+
+increase_pool_count(Num, Max) ->
+    Num1 = round(Num * 2 * 0.7),
+    case Num1 + Num > Max of
+        true -> Max - Num;
+        _ -> Num1
+    end.
+
 ch_to_state(Ch) ->
     ch_to_state(lists:reverse(Ch), []).
 ch_to_state([Ch|Children], NewList) ->
-    case erlang:hd(erlang:element(4, Ch)) of
+    case hd(element(4, Ch)) of
         sgi_pool -> % @todo fon't forget about this module name if will be changes of name of module.
-            Pid = erlang:element(2, Ch),
-            {ok, M} = sgi_pool:settings(Pid),
-            New = [#proc{
-                pid = Pid,
-                time_created = time_now(),
-                weight = maps:get(weight, M),
-                server_name = maps:get(server_name, M)}] ++ NewList,
-            ch_to_state(Children, New);
+            ch_to_state(Children, [make_pool(element(2, Ch))|NewList]);
         _ ->
             ch_to_state(Children, NewList)
     end;
@@ -141,22 +196,39 @@ ch_to_state([], New) ->
     proc_sort(New),
     ok.
 
+make_pool(Pid) ->
+    {ok, M} = sgi_pool:settings(Pid),
+    #proc{
+        pid = Pid,
+        time_created = time_now(),
+        weight = maps:get(weight, M),
+        server_name = maps:get(server_name, M)}.
+
 proc_sort(Processes) ->
     MapByServer = group_by_server(Processes), % @todo Will need save the Map of Servers when we will be to use
 %%    wf:info(?MODULE, "MapByServer: ~p~n", [MapByServer]),
     New1 = case wf:config(sgi, balancing_method) of
-        blurred -> blurred(MapByServer, length(Processes));
-        _ -> lists:sort(fun(A,B) -> A#proc.weight > B#proc.weight end, Processes)
+        blurred ->
+            blurred(MapByServer, length(Processes));
+        _ ->
+            Fun = fun(A,B) -> A#proc.weight > B#proc.weight end,
+            List1 = lists:sort(Fun, Processes),
+            lists:map(fun(P) -> P#proc.pid end, List1)
     end,
+    Temp = lists:map(fun(P) -> {P#proc.pid,P} end, Processes),
+    Map = maps:from_list(Temp),
+    OldMap = case wf:state(?PROC_MAP) of undefined -> #{}; M1 -> M1 end,
+    wf:state(?PROC_MAP, maps:merge(Map, OldMap)),
+    wf:state(?PROC_BY_SERVER, MapByServer),
     wf:state(?PROC_LIST, New1).
 
 group_by_server(Ch) ->
     S = wf:config(sgi, servers),
     group_by_server(S, Ch, 1, #{}).
 group_by_server([H|T], Ch, N, M) ->
-    K = "Server#" ++ wf:to_list(N),
     Settings = maps:from_list(H),
-    M1 = M#{K => #{settings => Settings, processes => ch_by_server(Ch, maps:get(name, Settings))}},
+    ServerName = maps:get(name, Settings),
+    M1 = M#{ServerName => #{settings => Settings, processes => ch_by_server(Ch, ServerName)}},
     group_by_server(T, Ch, N + 1, M1);
 group_by_server([], _, _, M) ->
     M.
@@ -165,7 +237,7 @@ ch_by_server(L, Name) ->
     ch_by_server(L, Name, []).
 ch_by_server([H|T], Name, Acc) ->
     case H#proc.server_name == Name of
-        true -> ch_by_server(T, Name, [H|Acc]);
+        true -> ch_by_server(T, Name, [H#proc.pid|Acc]);
         _ -> ch_by_server(T, Name, Acc)
     end;
 ch_by_server([], _, Acc) ->
@@ -174,8 +246,8 @@ ch_by_server([], _, Acc) ->
 blurred(M, Total) ->
     blurred(M, Total, []).
 blurred(M, Total, Acc) ->
-    Keys = maps:keys(M),
-    blurred(Keys, M, Total, Acc).
+    ServerNames = maps:keys(M),
+    blurred(ServerNames, M, Total, Acc).
 blurred([H|T], M, Total, Acc) ->
     case maps:get(processes, maps:get(H, M, []), []) of
         [] ->
@@ -191,106 +263,88 @@ blurred([], M, Total, Acc) ->
     end.
 
 get_list() ->
-    get(?PROC_LIST).
+    wf:state(?PROC_LIST).
+get_map() ->
+    wf:state(?PROC_MAP).
 
-
-
+-spec active() -> pid() | undefined.
 active() ->
-    L = get(?PROC_LIST),
-    active(L, [], undefined).
-active([#proc{status = ?AVAILABLE} = H | T], L, undefined) ->
-    check_connect_and_activate(H, T, L);
-active([#proc{status = ?DOWN} = H | T], L, undefined) ->
-    case check_pass_failed_time(H) of
-        true -> check_connect_and_activate(H, T, L);
-        _ -> active(T, [H|L], undefined)
-    end;
-active([H|T], L, Ret) ->
-    active(T, [H|L], Ret);
-active([], _, undefined) ->
-    undefined;
-active([], L, Pid) ->
-    wf:state(?PROC_LIST, lists:reverse(L)),
-    Pid.
-%%    active_nearly().
+    Map = wf:state(?PROC_MAP),
+    List = wf:state(?PROC_LIST),
 
-check_connect_and_activate(H, T, L) ->
-    case sgi_pool:try_connect(H#proc.pid) of
-        ok -> check_process_alive_before_activate(H, T, L);
-        error -> active(T, [H|L], undefined)
+    Pid = self(),
+    Ref = make_ref(),
+    spawn(fun() -> R = active(List, Map), Pid ! {R,Ref} end),
+    Ret1 = receive {Ret,Ref} -> Ret end,
+
+    case Ret1 of
+        undefined ->
+            undefined;
+        P ->
+            wf:state(?PROC_MAP, Map#{P#proc.pid := P#proc{status = ?NOTAVAILABLE}}),
+            P#proc.pid
     end.
 
-check_process_alive_before_activate(#proc{pid = Pid} = H, T, L) ->
-    case erlang:is_process_alive(Pid) of
-        true -> active(T, [H#proc{status = ?NOTAVAILABLE}|L], Pid);
-        _ -> active(T, L, undefined) % @todo Remove bad Process from Map of Servers
+-spec active(list(), map()) -> #proc{} | undefined.
+active([H|T], M) ->
+    P = maps:get(H,M,#proc{}),
+    case P#proc.status of
+        ?AVAILABLE ->
+            availabled(P,T,M);
+        ?DOWN ->
+            downed(P,T,M);
+        _ -> active(T,M)
+    end;
+active([], _) -> undefined.
+
+availabled(P,T,M) ->
+    case check_alive(P) andalso check_connect(P) of true->P;_->active(T,M) end.
+downed(P,T,M) -> % @todo Remove bad Process from Map of Servers
+    case check_pass_failed_time(P) andalso check_alive(P) andalso check_connect(P) of true->P;_->active(T,M) end.
+
+check_connect(#proc{pid = Pid}) ->
+    case sgi_pool:try_connect(Pid) of ok->true;error->false end.
+
+check_alive(#proc{pid = Pid}) ->
+    sgi:is_alive(Pid).
+
+check_pass_failed_time(P)->
+    time_now() > P#proc.failed_out.
+
+
+free1(Pid) ->
+    Map = wf:state(?PROC_MAP),
+    case maps:find(Pid, Map) of
+        {ok, P} -> wf:state(?PROC_MAP, Map#{Pid := P#proc{status = ?AVAILABLE}});
+        _ -> ok
     end.
 
-check_pass_failed_time(H)->
-    time_now() > H#proc.failed_out.
+free_all1() ->
+    Map = wf:state(?PROC_MAP),
+    Fun = fun(_K,V1)->case V1#proc.status==?NOTAVAILABLE of true->V1#proc{status=?AVAILABLE}; _->V1 end end,
+    Map1 = maps:map(Fun, Map),
+    wf:state(?PROC_MAP, Map1).
 
-free(Pid, L) ->
-    free(Pid, L, []).
-free(undefined, _, _) ->
-    ok;
-free(Pid, [H|T], L) ->
-    case Pid == H#proc.pid of
-        true ->
-            R = H#proc{status = ?AVAILABLE},
-            free(Pid, T, [R|L]);
-        _ ->
-            free(Pid, T, [H|L])
-    end;
-free(_, [], L) ->
-    wf:state(?PROC_LIST, lists:reverse(L)).
-
-free_all([#proc{status = ?DOWN} = H|T], L) ->
-    free_all(T, [H|L]);
-free_all([H|T], L) ->
-    R = H#proc{status = ?AVAILABLE},
-    free_all(T, [R|L]);
-free_all([], L) ->
-    wf:state(?PROC_LIST, lists:reverse(L)).
-
-down(Data) ->
-    L = get(?PROC_LIST),
-    down(Data, L, []).
-down({Pid, FailedTimeout} = Data, [H|T], L) ->
-    case Pid == H#proc.pid of
-        true ->
-            R = H#proc{status = ?DOWN, failed_out = (time_now() + FailedTimeout)},
-            down(Data, T, [R|L]);
-        _ ->
-            down(Data, T, [H|L])
-    end;
-down(_, [], L) ->
-    wf:state(?PROC_LIST, lists:reverse(L)),
-    ok.
+down1(Pid, FailedTimeout) ->
+    Map = wf:state(?PROC_MAP),
+    case maps:find(Pid, Map) of
+        {ok, P} -> wf:state(?PROC_MAP, Map#{Pid:=P#proc{status=?DOWN,failed_out=(time_now()+FailedTimeout)}});
+        _ -> ok
+    end.
 
 
-%%active_nearly() ->
-%%    List = get(?PROC_LIST),
-%%    Order = case get(?PROC_ORDER_NUM) of undefined -> 0; V -> V end,
-%%    active_nearly(Order + 1, List).
-%%active_nearly(Order, List) when Order > erlang:length(List) ->
-%%    active_nearly(1, List);
-%%active_nearly(Order, List) ->
-%%    I = lists:nth(Order, List),
-%%    put(?PROC_ORDER_NUM, Order),
-%%    I#proc.pid.
 
-%%active() ->
-%%    List = get(?PROC_LIST),
-%%    active(List, []).
-%%active([H|T], List) ->
-%%    case H#proc.status of
-%%        ?AVAILABLE -> H#proc.pid;
-%%        _ -> active(T)
-%%    end;
-%%active([], _) ->
-%%    active().
-%%%%    active_nearly().
-%%
+new_pool_started(Pid, _State) -> % when sgi:is_alive(Pid) ->
+    Pool = make_pool(Pid),
+
+    Map = wf:state(?PROC_MAP),
+
+    Server = maps:get(Pool#proc.server_name, Map, #{}),
+    PoolList = maps:get(processes, Server, []),
+
+    wf:state(?PROC_MAP, Map#{Pool#proc.server_name => Server#{processes => PoolList ++ [Pool]}}),
+    wf:state(?PROC_LIST, wf:state(?PROC_LIST) ++ [Pool]).
+
 
 time_now() ->
     erlang:system_time(seconds).

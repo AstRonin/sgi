@@ -3,7 +3,8 @@
 Application written on Erlang. General design principles is fast, low memory and modularity.
 
 SGI give possibility simple and smart way to connect to any server by [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol)
-and have other protocols working under TCP, first of all this is [FastCGI](https://en.wikipedia.org/wiki/FastCGI).
+and have other protocols working under TCP, first of all this is [FastCGI](https://en.wikipedia.org/wiki/FastCGI). This protocol, 
+for example, used for connect to PHP(FPM).
 
 ## Try Sample
 ### Sample 1
@@ -25,7 +26,7 @@ Use FastCGI protocol with N2O.
 
 Add deps to rebar.config:
 ```erlang
-{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.2"}}}
+{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.3"}}}
 ```
 Add initialization of fcgi protocol:
 ```erlang
@@ -49,8 +50,8 @@ Add follow section to sys.config
 ```erlang
 {sgi, [
     {servers, [
-         [{name, default}, {address, localhost}, {port, 9000}, {timeout, 60000}, {weight, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}], % failed_timeout in seconds
-         [{name, aaa},    {address, localhost}, {port, 9001}, {timeout, 60000}, {weight, 10}, {max_connections, 4}, {max_fails, 5}, {failed_timeout, 60}]
+        [{name, default}, {address, localhost}, {port, 9000}, {timeout, 60000}, {weight, 2}, {start_connections, 2}, {max_connections, 20}, {max_fails, 5}, {failed_timeout, 60}], % failed_timeout in seconds
+        [{name, aaa}, {address, localhost}, {port, 9001}, {timeout, 60000}, {weight, 10}, {start_connections, 2}, {max_connections, 4}, {max_fails, 5}, {failed_timeout, 60}]
     ]},
         % max_connections - run N processes with 1 connection on each process. Count cannot be bigger then children of fcgi processes
     {balancing_method, priority}, % priority | blurred, priority is default
@@ -80,7 +81,8 @@ Add follow section to sys.config
     - `port` - the port number (9000 is default port)
     - `timeout` - connection timeout to server (60000 is default number)
     - `weight` - the weight of the server, using for balancing (default - 1)
-    - `max_connections` - number of max connections to a server(default - 1)
+    - `start_connections` - the number of connections when server start at first time (default - 1)
+    - `max_connections` - number of max connections to a server, they will be added if necessary, dynamically (default - 1)
     - `max_fails` - the number of unsuccessful attempts to connect to a server (default - 10)
     - `failed_timeout` - the number in seconds after which a connection will try reuse
 - `balancing_method` - set the method for balancing, can be **priority** or **blurred**. 

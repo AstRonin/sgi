@@ -298,7 +298,7 @@ encode_pair_len(D) ->
 back(Data, State = #state{buff = B}) ->
     case decode(iolist_to_binary(lists:reverse([Data | B]))) of
         {?FCGI_STDERR, E, Rest} ->
-            wf:info(?MODULE, "socket_return, FCGI_STDERR: ~p~n", [E]),
+%%            wf:info(?MODULE, "socket_return, FCGI_STDERR: ~p~n", [E]),
             State#state.parent ! {sgi_fcgi_return, <<>>, stream_body(E)},
             back(Rest, State#state{buff = []});
         {?FCGI_STDOUT, Packet, Rest} ->

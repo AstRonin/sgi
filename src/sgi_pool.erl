@@ -46,14 +46,15 @@ try_connect(Pid) ->
 
 init([Name, Conf]) ->
     wf:info(?MODULE, "Run Pool with name: ~p~n", [Name]),
+%%    self() ! send_alive, % @todo it obtains overload if more than 1000 processes will send this message
     {ok, #state{
-        server_name    = pv(name, Conf, default),
-        address        = pv(address, Conf, localhost),
-        port           = pv(port, Conf, 80),
-        weight         = pv(weight, Conf, 1),
-        max_fails      = pv(max_fails, Conf, 10),
-        failed_timeout = pv(failed_timeout, Conf, 1),
-        timeout        = pv(timeout, Conf, 30000)
+        server_name    = sgi:pv(name, Conf, default),
+        address        = sgi:pv(address, Conf, localhost),
+        port           = sgi:pv(port, Conf, 9000),
+        weight         = sgi:pv(weight, Conf, 1),
+        max_fails      = sgi:pv(max_fails, Conf, 10),
+        failed_timeout = sgi:pv(failed_timeout, Conf, 1), % in seconds
+        timeout        = sgi:pv(timeout, Conf, 30000)
     }}.
 
 handle_call({once, Request}, _From, State) ->
@@ -117,6 +118,12 @@ handle_info({tcp_error, _Socket, Reason}, State) ->
 handle_info(hibernate, State) ->
     State1 = close(State),
     {noreply, State1, hibernate};
+handle_info(send_alive, State) -> % @todo it obtains overload if more than 1000 processes will send this message
+    case sgi:is_alive(sgi_arbiter) of
+        true -> sgi_arbiter:new_pool_started(self());
+        _ -> wait
+    end,
+    {noreply, State};
 handle_info(Info, State) ->
     wf:error(?MODULE, "Unexpected message: ~p~n", [Info]),
     {noreply, timer(State)}.
@@ -183,7 +190,3 @@ overage_fail_conns(State) ->
             State
     end.
 
-pv(K, L) ->
-    pv(K, L, undefined).
-pv(K, L, D) ->
-    proplists:get_value(K, L, D).
