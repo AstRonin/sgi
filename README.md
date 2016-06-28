@@ -8,6 +8,9 @@ for example, used for connect to PHP (FPM).
 
 ## Try Sample
 ### Sample 1
+
+This sample show you how you can add "Busines Logic" (big or old) to your site using PHP files.
+
 It based on the sample from [n2o](https://github.com/synrc/n2o).
 
     $ git clone git://github.com/astronin/sgi
