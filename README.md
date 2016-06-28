@@ -25,11 +25,10 @@ Now you can try it out: http://localhost:8000
 This sample show you how you can run your site(wrote in PHP) with support WebSocket. Forget about Ajax and do your page much faster.
 
 You have follow advantages compared to Ajax even in common web page:
-
-    - Fast
-    - Low overhead, especially over https
-    - Easy forwarding a file
-    - Saving CPU resources of both a client and a server
+- Fast
+- Low overhead, especially over https
+- Easy forwarding a file
+- Saving CPU resources of both a client and a server
 
 ##### Settup:
 
@@ -205,11 +204,14 @@ Set callback after start process `sgi_multiplexer:set_callback({M, F})` or
 set callback to each request `{send, Request, PoolPid, M, F}`.
 
 ##### Using
-1. Search a free stream and hold found
+
+- Search a free stream and hold found
+
 ```erlang
 {ok, PoolPid} = sgi_arbiter:alloc(),
 ```
-2. Send data
+- Send data
+
 ```erlang
 PoolPid ! {send, Data, self()},
 ```
@@ -217,7 +219,8 @@ PoolPid ! {send, Data, self()},
 ```erlang
 sgi_multiplexer ! {send, Data, PoolPid},
 ```
-3. Receive data from sockets, normal respones
+- Receive data from sockets, normal respones
+
 ```erlang
 handle_info({socket_return, Data}, State)
 ```
@@ -225,7 +228,8 @@ handle_info({socket_return, Data}, State)
 ```erlang
 handle_info({socket_error, Data}, State)
 ```
-4. To free the held stream
+- To free the held stream
+
 ```erlang
 sgi_arbiter:free(PoolPid),
 ```
