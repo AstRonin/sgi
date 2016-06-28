@@ -4,11 +4,11 @@ Application written on Erlang. General design principles is fast, low memory and
 
 SGI give possibility simple and smart way to connect to any server by [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol)
 and have other protocols working under TCP, first of all this is [FastCGI](https://en.wikipedia.org/wiki/FastCGI). This protocol, 
-for example, used for connect to PHP(FPM).
+for example, used for connect to PHP (FPM).
 
 ## Try Sample
 ### Sample 1
-It based on the sample from n2o.
+It based on the sample from [n2o](https://github.com/synrc/n2o).
 
     $ git clone git://github.com/astronin/sgi
     $ cd sgi/samples
@@ -20,13 +20,41 @@ Run php as fcgi server
 
 Now you can try it out: http://localhost:8000
 
+### Sample 2
+
+This sample show you how you can run your site(wrote in PHP) with support WebSocket. Forget about Ajax and do your page much faster.
+
+You have follow advantages compared to Ajax even in common web page:
+
+    - Fast
+    - Low overhead, especially over https
+    - Easy forwarding a file
+    - Saving CPU resources of both a client and a server
+
+##### Settup:
+
+    $ git clone git://github.com/astronin/sgi
+    $ cd sgi/samples
+    
+Change app in rebar.config:
+
+    $ vim samples/apps/rebar.config
+**{sub_dirs, [ "review" ]}**. -> **{sub_dirs, [ "review2" ]}**.
+    
+Run Server:
+
+    $ ./mad deps compile plan repl
+
+
+Url:  http://localhost:8000/site.php
+
 ## 1. Basic usage
 
 Use FastCGI protocol with N2O.
 
 Add deps to rebar.config:
 ```erlang
-{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.3"}}}
+{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "0.4"}}}
 ```
 Add initialization of fcgi protocol:
 ```erlang
@@ -44,14 +72,18 @@ Using js code for returning data to the browser:
 ```erlang
 wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++", "++wf:to_list(jsone:encode(Headers))++")");
 ```
+Terminate fcgi protocol and clear memory:
+```erlang
+fcgi_end()
+```
 
 #### Configuration
 Add follow section to sys.config
 ```erlang
 {sgi, [
     {servers, [
-        [{name, default}, {address, localhost}, {port, 9000}, {timeout, 60000}, {weight, 2}, {start_connections, 2}, {max_connections, 20}, {max_fails, 5}, {failed_timeout, 60}], % failed_timeout in seconds
-        [{name, aaa}, {address, localhost}, {port, 9001}, {timeout, 60000}, {weight, 10}, {start_connections, 2}, {max_connections, 4}, {max_fails, 5}, {failed_timeout, 60}]
+        [{name, default}, {address, localhost}, {port, 9000}, {timeout, 60000}, {weight, 2}, {start_connections, 10}, {max_connections, 1000}, {max_fails, 5}, {failed_timeout, 60}], % failed_timeout in seconds
+        [{name, aaa},    {address, localhost}, {port, 9001}, {timeout, 60000}, {weight, 5}, {start_connections, 2}, {max_connections, 4}, {max_fails, 5}, {failed_timeout, 60}]
     ]},
         % max_connections - run N processes with 1 connection on each process. Count cannot be bigger then children of fcgi processes
     {balancing_method, priority}, % priority | blurred, priority is default
@@ -82,7 +114,7 @@ Add follow section to sys.config
     - `timeout` - connection timeout to server (60000 is default number)
     - `weight` - the weight of the server, using for balancing (default - 1)
     - `start_connections` - the number of connections when server start at first time (default - 1)
-    - `max_connections` - number of max connections to a server, they will be added if necessary, dynamically (default - 1)
+    - `max_connections` - number of max connections to a server, they will be added if will be necessary, created dynamically (default - 1)
     - `max_fails` - the number of unsuccessful attempts to connect to a server (default - 10)
     - `failed_timeout` - the number in seconds after which a connection will try reuse
 - `balancing_method` - set the method for balancing, can be **priority** or **blurred**. 
@@ -173,27 +205,27 @@ Set callback after start process `sgi_multiplexer:set_callback({M, F})` or
 set callback to each request `{send, Request, PoolPid, M, F}`.
 
 ##### Using
-To search a free stream and hold found
+1. Search a free stream and hold found
 ```erlang
 {ok, PoolPid} = sgi_arbiter:alloc(),
 ```
-Send data with multiplexer
-```erlang
-sgi_multiplexer ! {send, Data, PoolPid},
-```
-or Send data without multiplexer
+2. Send data
 ```erlang
 PoolPid ! {send, Data, self()},
 ```
-Receive data from sockets, normal respones
+*or send data with multiplexer*
+```erlang
+sgi_multiplexer ! {send, Data, PoolPid},
+```
+3. Receive data from sockets, normal respones
 ```erlang
 handle_info({socket_return, Data}, State)
 ```
-or was some error with connecting or sending a message
+*or was some error with connecting or sending a message*
 ```erlang
 handle_info({socket_error, Data}, State)
 ```
-To free the held stream
+4. To free the held stream
 ```erlang
 sgi_arbiter:free(PoolPid),
 ```

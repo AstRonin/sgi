@@ -16,7 +16,20 @@
 -define(SERVER, ?MODULE).
 -define(HIBERNATE_AFTER, 1800000). % 30 minutes
 
--record(state, {server_name, address, port, weight, timeout, max_fails, failed_timeout, fails = 0, socket, parent, timer}).
+-record(state, {
+    server_name,
+    address,
+    port,
+    weight,
+    timeout,
+    max_fails,
+    failed_timeout,
+    fails = 0,
+    socket,
+    from,
+    timer,
+    last_active_time = 0
+}).
 
 -type tcp_active_type() :: true | false | once | (N :: -32768..32767).
 
@@ -44,9 +57,8 @@ try_connect(Pid) ->
 %%% gen_server callbacks
 %%%===================================================================
 
-init([Name, Conf]) ->
-    wf:info(?MODULE, "Run Pool with name: ~p~n", [Name]),
-%%    self() ! send_alive, % @todo it obtains overload if more than 1000 processes will send this message
+init([_Name, Conf]) ->
+    timer:send_interval(?HIBERNATE_AFTER, self(), hibernate),
     {ok, #state{
         server_name    = sgi:pv(name, Conf, default),
         address        = sgi:pv(address, Conf, localhost),
@@ -64,13 +76,13 @@ handle_call({once, Request}, _From, State) ->
             case do_recv_once(State1) of
                 {ok, B} ->
                     State2 = close(State1),
-                    {reply, {ok, B}, timer(State2)};
+                    {reply, {ok, B}, set_last_active_time(State2)};
                 {error, Reason} ->
-                    {reply, {error, Reason}, timer(State1)}
+                    {reply, {error, Reason}, set_last_active_time(State1)}
             end;
         {error, Reason, State1} ->
             wf:error(?MODULE, "Can't create Socket: ~p~n", [Reason]),
-            {reply, {error, Reason}, timer(State1)}
+            {reply, {error, Reason}, set_last_active_time(State1)}
     end;
 handle_call(get_settings, _From, State) ->
     M = #{weight => State#state.weight, server_name => State#state.server_name},
@@ -87,37 +99,40 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info({send, Request, From}, State) ->
-    State1 = State#state{parent = From},
+    State1 = State#state{from = From},
     case connect(State1) of
         {ok, State2} ->
-%%            gen_tcp:send(State2#state.socket, Request);
             case gen_tcp:send(State2#state.socket, Request) of
                 ok ->
-%%                    wf:info(?MODULE, "TCP SEND to: ~p, Request: ~p~n", [State2#state.socket, Request]),
-                    {noreply, timer(State2)};
+                    {noreply, set_last_active_time(State2)};
                 {error, Reason1} ->
-                    State2#state.parent ! {socket_error, Reason1},
+                    State2#state.from ! {socket_error, Reason1},
                     wf:error(?MODULE, "Pool cannot send message: ~p~n", [Reason1]),
-                    {noreply, timer(State2)}
+                    {noreply, set_last_active_time(State2)}
             end;
         {error, Reason, State2} ->
-            State2#state.parent ! {socket_error, Reason},
+            State2#state.from ! {socket_error, Reason},
             wf:error(?MODULE, "Can't create Socket: ~p~n", [Reason]),
-            {noreply, timer(State2)}
+            {noreply, set_last_active_time(State2)}
     end;
 handle_info({tcp, Socket, Data}, State) ->
-    State#state.parent ! {socket_return, Data},
+    State#state.from ! {socket_return, Data},
     inet:setopts(Socket, [{active, once}]),
-    {noreply, timer(State)};
+    {noreply, set_last_active_time(State)};
 handle_info({tcp_closed, _Socket}, State) ->
     wf:info(?MODULE, "TCP connection CLOSED with state: ~p~n", [State]),
-    {noreply, timer(State#state{socket = undefined})};
+    {noreply, set_last_active_time(State#state{socket = undefined})};
 handle_info({tcp_error, _Socket, Reason}, State) ->
     wf:info(?MODULE, "TCP connection got ERROR: ~p with state: ~p~n", [Reason, State]),
-    {noreply, timer(State#state{socket = undefined})};
+    {noreply, set_last_active_time(State#state{socket = undefined})};
 handle_info(hibernate, State) ->
-    State1 = close(State),
-    {noreply, State1, hibernate};
+    case sgi:time_now() > (State#state.last_active_time + ?HIBERNATE_AFTER) of
+        true ->
+            State1 = close(State),
+            {noreply, State1, hibernate};
+        _ ->
+            {noreply, State}
+    end;
 handle_info(send_alive, State) -> % @todo it obtains overload if more than 1000 processes will send this message
     case sgi:is_alive(sgi_arbiter) of
         true -> sgi_arbiter:new_pool_started(self());
@@ -126,7 +141,7 @@ handle_info(send_alive, State) -> % @todo it obtains overload if more than 1000 
     {noreply, State};
 handle_info(Info, State) ->
     wf:error(?MODULE, "Unexpected message: ~p~n", [Info]),
-    {noreply, timer(State)}.
+    {noreply, set_last_active_time(State)}.
 
 terminate(_Reason, State) ->
     close(State),
@@ -145,7 +160,6 @@ connect(State = #state{socket = undefined, address = Address, port = Port}, Acti
     case gen_tcp:connect(Address, Port, [binary, {active, Active}], State#state.timeout) of
         {ok, Socket} ->
             State1 = State#state{socket = Socket, fails = 0},
-            wf:info(?MODULE, "TCP connect socket: ~p, Pid: ~p~n", [Socket, self()]),
             {ok, State1};
         {error, Reason} ->
             State1 = State#state{fails = State#state.fails + 1},
@@ -177,9 +191,8 @@ do_recv_once(State) ->
             {error, Reason}
     end.
 
-timer(State) ->
-    Timer = timer:send_after(?HIBERNATE_AFTER, hibernate),
-    State#state{timer = Timer}.
+set_last_active_time(State) ->
+    State#state{last_active_time = sgi:time_now()}.
 
 overage_fail_conns(State) ->
     case State#state.fails >= State#state.max_fails of

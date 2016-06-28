@@ -13,11 +13,14 @@
 
 start_link() ->
     Ret = supervisor:start_link({local, ?SERVER}, ?MODULE, []),
-    Ch = supervisor:which_children(?SERVER),
-    sgi_sup:start_child(sgi_arbiter, Ch),
+    timer:sleep(100),
+    sgi_sup:start_child(sgi_arbiter),
     Ret.
 
-start_pool_children(Num, Conf) when is_integer(Num) ->
+-spec start_pool_children(Num, Conf) -> ok when
+    Num :: non_neg_integer(),
+    Conf :: [tuple()]. % list from sys.config
+start_pool_children(Num, Conf) when is_integer(Num) andalso Num > 0 ->
     ChildSpecs = make_pool_spec(Num, Conf, []),
     start_pool_children(ChildSpecs);
 start_pool_children(_,_) -> ok.
@@ -61,7 +64,7 @@ make_pool_spec([H|T], L) ->
     make_pool_spec(T, L ++ P).
 
 make_pool_spec(0, _, L) -> L;
-make_pool_spec(Num, Conf, L) when is_integer(Num) ->
+make_pool_spec(Num, Conf, L) when is_integer(Num) andalso Num > 0 ->
     N = wf:to_atom("Pool#" ++ wf:to_list(sgi:pv(name, Conf, default)) ++ "," ++ wf:to_list(rand:uniform(100000))),
     M = #{id => N, start => {sgi_pool, start_link, [N, Conf]}},
     make_pool_spec(Num - 1, Conf, [M|L]);

@@ -41,33 +41,18 @@ send(Http) ->
     {_, Body} = bs(Http),
     FCGIParams = get_params(Http),
 
-%%    wf:info(?MODULE, "FCGIParams:~p~n", [FCGIParams]),
+    {ok, Pid} = sgi_fcgi:start(),
+    Pid ! {overall, self(), FCGIParams, has_body(Http), Body},
+    Timer = erlang:send_after(wf:config(sgi, fcgi_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
+    Ret = ret(),
+    sgi:ct(Timer),
+    sgi_fcgi:stop(Pid),
+    RetH = get_response_headers(),
+    set_header_to_cowboy(RetH, 0),
+    terminate(),
+    %% @todo Return headers from cgi because cowboy don't give access to resp_headers
+    {Ret, wf:state(status), RetH}.
 
-    case sgi_fcgi:start(1,1) of
-        {ok, Pid} ->
-            sgi_fcgi:params(Pid, FCGIParams),
-            case has_body(Http) of true -> Pid ! {5, Body}; _ -> ok end,
-            sgi_fcgi:end_req(Pid),
-            Timer = erlang:send_after(wf:config(sgi, fcgi_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
-
-            Ret = ret(),
-
-            erlang:cancel_timer(Timer),
-            sgi_fcgi:stop(Pid),
-
-            RetH = get_response_headers(),
-            set_header_to_cowboy(RetH, 0),
-            terminate(),
-            %% @todo Return headers from cgi because cowboy don't give access to resp_headers
-            {Ret, wf:state(status), RetH};
-        {error, _Reason, Pid} ->
-            sgi_fcgi:stop(Pid),
-            set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
-            wf:state(status, 500),
-            terminate(),
-            {[], 500, []}
-    end.
-%%    {iolist_to_binary(Ret), wf:state(status), RetH}.
 
 %% ===========================================================
 %% Prepare Request
@@ -362,13 +347,11 @@ ret() ->
 stdout(Data) ->
     case get_response_headers_ended() of
         true -> [Data | ret()];
-    _ ->
-        {ok, Hs, B} = decode_result(Data),
-            Ret = [B | ret()],
+        _ ->
+            {ok, Hs, B} = decode_result(Data),
             case Hs of [] -> skip; _ -> update_response_headers(Hs) end,
-            Ret
-    end
-.
+            [B | ret()]
+    end.
 
 update_response_headers(Hs) ->
     update_response_headers(Hs, false).
@@ -457,4 +440,7 @@ terminate() ->
     wf:state(vhost, []),
     wf:state(sgi_n2o_fcgi_ws_url_parts, undefined),
     wf:state(sgi_n2o_fcgi_body_length, undefined),
-    wf:state(sgi_n2o_fcgi_response_headers, #response_headers{}).
+    wf:state(sgi_n2o_fcgi_response_headers, #response_headers{}),
+
+    sgi_fcgi:stop(wf:state(sgi_n2o_fcgi_sgi_fcgi)),
+    wf:state(sgi_n2o_fcgi_sgi_fcgi, undefined).

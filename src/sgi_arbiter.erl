@@ -1,7 +1,6 @@
 %%
 %% @todo Add check active Pool Pocesses (sgi_pool), run ch_to_state each 10(for example) minutes
 %%
-
 -module(sgi_arbiter).
 
 -behaviour(gen_server).
@@ -39,7 +38,7 @@
 
 -define(PROC_ORDER_NUM, proc_order_num).
 
--record(state, {adding_new_pool = 0}).
+-record(state, {adding_new_pool = 0, ch_to_state_timer}).
 -record(proc, {pid, weight = 1, server_name, status = ?AVAILABLE, time_created = 0, failed_out = 0}).
 
 %%%===================================================================
@@ -52,14 +51,13 @@ start_link(A) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [A], []).
 
 alloc() ->
-    alloc(10).
+    alloc(300).
 alloc(0) ->
     {error, "Attempts have ended"};
 alloc(CountTry) ->
-    case gen_server:call(?SERVER, alloc) of
+    case gen_server:call(?SERVER, alloc, 1000) of
         {ok, undefined} ->
-%%            wf:error(?MODULE, "Pid is undefined, waiting 1000 ms ~n", []),
-            timer:sleep(1000),
+            timer:sleep(100), % @todo add changing this number dynamically
             alloc(CountTry - 1);
         {ok, Pid} -> {ok, Pid}
     end.
@@ -87,8 +85,6 @@ down(Pid, FailedTimeout) ->
 %%%===================================================================
 
 init([]) ->
-    {ok, #state{}};
-init([Ch]) ->
     self() ! ch_to_state,
     {ok, #state{adding_new_pool = 1}}.
 
@@ -109,9 +105,7 @@ handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 
-
 handle_cast({down, Pid, FailedTimeout}, State) ->
-%%    wf:info(?MODULE, "Pool worker is down: ~p~n", [Pid]),
     down1(Pid, FailedTimeout),
     {noreply, State};
 handle_cast({free, Pid}, State) ->
@@ -126,30 +120,30 @@ handle_cast(free_all, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+handle_info(add_pool, #state{adding_new_pool = 1} = State) ->
+    {noreply, State};
 handle_info(add_pool, State) ->
-    State1 = case State#state.adding_new_pool of
-        0 ->
-            case add_pool() of
-                AddedNum when AddedNum > 0 ->
-                    erlang:send_after(1000, self(), ch_to_state),
-                    State#state{adding_new_pool = 1};
-                _ ->
-                    State
-            end;
+    State1 = case add_pool() of
+        N when is_integer(N) andalso N > 0 ->
+            T = erlang:send_after(100, self(), ch_to_state),
+            State#state{adding_new_pool = 1, ch_to_state_timer = T};
         _ ->
             State
     end,
     {noreply, State1};
 handle_info(ch_to_state, State) ->
+    sgi:ct(State#state.ch_to_state_timer),
     Ch = supervisor:which_children(?SUPERVISOR),
     ch_to_state(Ch),
-    {noreply, State#state{adding_new_pool = 0}};
+    {noreply, State#state{adding_new_pool = 0, ch_to_state_timer = undefined}};
 handle_info(Info, State) ->
-    wf:info(?MODULE, "Unknown Request: ~p~n", [Info]),
+    wf:error(?MODULE, "Unknown Request: ~p~n", [Info]),
     {noreply, State}.
+
 
 terminate(_Reason, _State) ->
     ok.
+
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -163,11 +157,11 @@ add_pool() ->
     add_pool(maps:values(S), 0).
 add_pool([H|T], AddedNum) ->
     Sett = maps:get(settings, H, #{}),
-    Max = maps:get(max_connections, Sett, 1),
-    Len = length(maps:get(processes, H, [])),
-    AddedNum1 = AddedNum + case Len < Max of
+    MaxConnCount = maps:get(max_connections, Sett, 1),
+    ProcCount = length(maps:get(processes, H, [])),
+    AddedNum1 = AddedNum + case ProcCount < MaxConnCount of
         true ->
-            Num = increase_pool_count(Len, Max),
+            Num = increase_pool_count(ProcCount, MaxConnCount),
             spawn(fun() -> sgi_sup:start_pool_children(Num, maps:to_list(Sett)) end),
             Num;
         _ ->
@@ -176,12 +170,9 @@ add_pool([H|T], AddedNum) ->
     add_pool(T, AddedNum1);
 add_pool([], AddedNum) -> AddedNum.
 
-increase_pool_count(Num, Max) ->
-    Num1 = round(Num * 2 * 0.7),
-    case Num1 + Num > Max of
-        true -> Max - Num;
-        _ -> Num1
-    end.
+increase_pool_count(Num, Max) -> % Num * 2 * ratio, ratio - 0.8 and can be changing
+    Num1 = round(Num * 2 * 0.8),
+    case Num1 > Max of true -> Max - Num; _ -> Num1 - Num end.
 
 ch_to_state(Ch) ->
     ch_to_state(lists:reverse(Ch), []).
@@ -192,28 +183,27 @@ ch_to_state([Ch|Children], NewList) ->
         _ ->
             ch_to_state(Children, NewList)
     end;
-ch_to_state([], New) ->
-    proc_sort(New),
+ch_to_state([], NewList) ->
+    proc_sort(NewList),
     ok.
 
 make_pool(Pid) ->
     {ok, M} = sgi_pool:settings(Pid),
     #proc{
         pid = Pid,
-        time_created = time_now(),
+        time_created = sgi:time_now(),
         weight = maps:get(weight, M),
         server_name = maps:get(server_name, M)}.
 
 proc_sort(Processes) ->
-    MapByServer = group_by_server(Processes), % @todo Will need save the Map of Servers when we will be to use
-%%    wf:info(?MODULE, "MapByServer: ~p~n", [MapByServer]),
+    MapByServer = group_by_server(Processes),
     New1 = case wf:config(sgi, balancing_method) of
         blurred ->
             blurred(MapByServer, length(Processes));
         _ ->
             Fun = fun(A,B) -> A#proc.weight > B#proc.weight end,
-            List1 = lists:sort(Fun, Processes),
-            lists:map(fun(P) -> P#proc.pid end, List1)
+            SortedList = lists:sort(Fun, Processes),
+            lists:map(fun(P) -> P#proc.pid end, SortedList)
     end,
     Temp = lists:map(fun(P) -> {P#proc.pid,P} end, Processes),
     Map = maps:from_list(Temp),
@@ -271,10 +261,9 @@ get_map() ->
 active() ->
     Map = wf:state(?PROC_MAP),
     List = wf:state(?PROC_LIST),
-
-    Pid = self(),
+    Self= self(),
     Ref = make_ref(),
-    spawn(fun() -> R = active(List, Map), Pid ! {R,Ref} end),
+    spawn(fun() -> R = active(List, Map), Self ! {R,Ref} end),
     Ret1 = receive {Ret,Ref} -> Ret end,
 
     case Ret1 of
@@ -299,7 +288,7 @@ active([], _) -> undefined.
 
 availabled(P,T,M) ->
     case check_alive(P) andalso check_connect(P) of true->P;_->active(T,M) end.
-downed(P,T,M) -> % @todo Remove bad Process from Map of Servers
+downed(P,T,M) ->
     case check_pass_failed_time(P) andalso check_alive(P) andalso check_connect(P) of true->P;_->active(T,M) end.
 
 check_connect(#proc{pid = Pid}) ->
@@ -309,8 +298,7 @@ check_alive(#proc{pid = Pid}) ->
     sgi:is_alive(Pid).
 
 check_pass_failed_time(P)->
-    time_now() > P#proc.failed_out.
-
+    sgi:time_now() > P#proc.failed_out.
 
 free1(Pid) ->
     Map = wf:state(?PROC_MAP),
@@ -328,7 +316,7 @@ free_all1() ->
 down1(Pid, FailedTimeout) ->
     Map = wf:state(?PROC_MAP),
     case maps:find(Pid, Map) of
-        {ok, P} -> wf:state(?PROC_MAP, Map#{Pid:=P#proc{status=?DOWN,failed_out=(time_now()+FailedTimeout)}});
+        {ok, P} -> wf:state(?PROC_MAP, Map#{Pid:=P#proc{status=?DOWN,failed_out=(sgi:time_now()+FailedTimeout)}});
         _ -> ok
     end.
 
@@ -339,12 +327,8 @@ new_pool_started(Pid, _State) -> % when sgi:is_alive(Pid) ->
 
     Map = wf:state(?PROC_MAP),
 
-    Server = maps:get(Pool#proc.server_name, Map, #{}),
-    PoolList = maps:get(processes, Server, []),
+    ServerName = maps:get(Pool#proc.server_name, Map, #{}),
+    PoolList = maps:get(processes, ServerName, []),
 
-    wf:state(?PROC_MAP, Map#{Pool#proc.server_name => Server#{processes => PoolList ++ [Pool]}}),
+    wf:state(?PROC_MAP, Map#{Pool#proc.server_name => ServerName#{processes => PoolList ++ [Pool]}}),
     wf:state(?PROC_LIST, wf:state(?PROC_LIST) ++ [Pool]).
-
-
-time_now() ->
-    erlang:system_time(seconds).

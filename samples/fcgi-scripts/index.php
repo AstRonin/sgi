@@ -1,5 +1,3 @@
-<h2>Some PHP page</h2>
-
 <script>
 	sendTestForm = function (obj) {
         var settings = {
@@ -20,6 +18,7 @@
     };
 </script>
 
+<h2>Test form send data to server by FastCGI protocol (to PHP)</h2>
 <div style="margin: 10px;">
     <form action="" method="post" onsubmit="sendTestForm(this);return false;">
         <div>
