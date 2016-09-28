@@ -9,7 +9,7 @@
 -define(PROTO_HTTP, <<"HTTP/1.1">>).
 -define(DEF_FCGI_PORT, 9000).
 -define(DEF_RESP_STATUS, 200).
--define(DEF_TIMEOUT, 60000).
+-define(DEF_TIMEOUT, 600000).
 
 -define(WS_URL_PARTS, (get(sgi_n2o_fcgi_ws_url_parts))).
 
@@ -51,7 +51,7 @@ send(Http) ->
     set_header_to_cowboy(RetH, 0),
     terminate(),
     %% @todo Return headers from cgi because cowboy don't give access to resp_headers
-    {Ret, wf:state(status), RetH}.
+    {iolist_to_binary(Ret), wf:state(status), RetH}.
 
 
 %% ===========================================================

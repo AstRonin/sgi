@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, start_link/1, start_link/2, once_call/2, settings/1, try_connect/1]).
+-export([start_link/0, start_link/1, start_link/2, once_call/2, jsend/1, settings/1, try_connect/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -14,6 +14,7 @@
     code_change/3]).
 
 -define(SERVER, ?MODULE).
+-define(ARBITER, sgi_arbiter).
 -define(HIBERNATE_AFTER, 1800000). % 30 minutes
 
 -record(state, {
@@ -52,6 +53,12 @@ settings(Pid) ->
 
 try_connect(Pid) ->
     gen_server:call(Pid, try_connect).
+
+jsend(Request) ->
+    {ok, PoolPid} = ?ARBITER:alloc(),
+    {ok, Bin} = gen_server:call(PoolPid, {jsend, Request}),
+    ?ARBITER:free(PoolPid),
+    {ok, Bin}.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -92,6 +99,12 @@ handle_call(try_connect, _From, State) ->
         {ok, State1} -> {reply, ok, State1};
         {error, _Reason, State1} -> {reply, error, State1}
     end;
+handle_call({jsend, Request}, _From, State) ->
+    {ok, State1} = connect(State, false),
+    ok = gen_tcp:send(State1#state.socket, Request),
+    {ok, Bin} = do_recv(State1, []),
+    State2 = close(State1),
+    {reply, {ok, Bin}, State2};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -182,6 +195,16 @@ close(State) when State#state.socket /= undefined ->
     gen_tcp:close(State#state.socket),
     State#state{socket = undefined};
 close(State) -> State.
+
+do_recv(State, Bs) ->
+    case gen_tcp:recv(State#state.socket, 0) of
+        {ok, B} ->
+            do_recv(State, [Bs, B]);
+        {error, closed} ->
+            {ok, list_to_binary(Bs)};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 do_recv_once(State) ->
     case gen_tcp:recv(State#state.socket, 0) of

@@ -246,7 +246,7 @@ handle_info({overall, From, Params, HasBody, Body}, State) ->
 %%===================================
 
 handle_info({socket_return, Data}, State) ->
-    State1 = back(Data, State),
+    State1 = send_back(Data, State),
     {noreply, State1};
 handle_info({socket_error, Data}, State) ->
     State#state.parent ! {sgi_fcgi_return_error, Data},
@@ -332,26 +332,26 @@ encode_pair_len(D) ->
         L1 -> <<1:1, L1:31>>
     end.
 
-back(<<>>, State) ->
+send_back(<<>>, State) ->
     State;
-back(Data, State = #state{buff = B}) ->
+send_back(Data, State = #state{buff = B}) ->
     Data1 = <<B/binary, Data/binary>>,
     case decode(Data1) of
         {?FCGI_STDERR, E, Rest} ->
 %%            wf:info(?MODULE, "socket_return, FCGI_STDERR: ~p~n", [E]),
             State#state.parent ! {sgi_fcgi_return, <<>>, stream_body(E)},
-            back(Rest, State#state{buff = <<>>});
+            send_back(Rest, State#state{buff = <<>>});
         {?FCGI_STDOUT, Packet, Rest} ->
             State#state.parent ! {sgi_fcgi_return, Packet, <<>>},
-            back(Rest, State#state{buff = <<>>});
+            send_back(Rest, State#state{buff = <<>>});
         {?FCGI_DATA, Packet, Rest} ->
             State#state.parent ! {sgi_fcgi_return, Packet, <<>>},
-            back(Rest, State#state{buff = <<>>});
+            send_back(Rest, State#state{buff = <<>>});
         {?FCGI_END_REQUEST, <<_AppStatus:32, _ProtocolStatus, _Reserved:24>>, Rest} ->
 %%            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, AppStatus:~p~n, ProtocolStatus:~p~n", [AppStatus, ProtocolStatus]),
             State#state.parent ! sgi_fcgi_return_end,
             del_req(State#state.req_id),
-            back(Rest, State#state{buff = <<>>, req_id = 0});
+            send_back(Rest, State#state{buff = <<>>, req_id = 0});
         more ->
             State#state{buff = Data1};
         <<>> ->

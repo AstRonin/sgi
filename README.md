@@ -52,34 +52,10 @@ Url:  http://localhost:8000/site.php
 
 ## 1. Basic usage
 
-Use FastCGI protocol with N2O.
-
-Add deps to rebar.config:
-```erlang
-{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "master"}}}
-```
-Add initialization of fcgi protocol:
-```erlang
-sgi_fcgi:init_fcgi()
-```
-Add new **event** in your file (index.erl):
-```erlang
-event(#http{url = _Url, method = _Method, body = _Body} = Http)
-```
-Send data to the FastCGI Server:
-```erlang
-{Ret, Status, Headers} = sgi_n2o_fcgi_handler:send(Http),
-```
-Using js code for returning data to the browser:
-```erlang
-wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++", "++wf:to_list(jsone:encode(Headers))++")");
-```
-Terminate fcgi protocol and clear memory:
-```erlang
-fcgi_end()
-```
+### Use FastCGI protocol with N2O.
 
 #### Configuration
+
 Add follow section to sys.config
 ```erlang
 {sgi, [
@@ -89,7 +65,7 @@ Add follow section to sys.config
     ]},
         % max_connections - run N processes with 1 connection on each process. Count cannot be bigger then children of fcgi processes
     {balancing_method, priority}, % priority | blurred, priority is default
-    {fcgi_timeout, 60000}, % 1 minute
+    {fcgi_timeout, 600000}, % 10 minutes
     {multiplexed, unknown}, % can be "1" | "0" | unknown
     {vhosts, [
         [
@@ -131,6 +107,33 @@ Add follow section to sys.config
     Blurred method uses all servers but without potential overload one of a server.
 - `vhosts` - part of fastcgi
 
+### Steps of request to FCGI
+
+Add deps to rebar.config:
+```erlang
+{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "master"}}}
+```
+Add initialization of fcgi protocol:
+```erlang
+sgi_fcgi:init_fcgi()
+```
+Add new **event** in your file (index.erl):
+```erlang
+event(#http{url = _Url, method = _Method, body = _Body} = Http)
+```
+Send data to the FastCGI Server:
+```erlang
+{Ret, Status, Headers} = sgi_n2o_fcgi_handler:send(Http),
+```
+Using js code for returning data to the browser:
+```erlang
+wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++", "++wf:to_list(jsone:encode(Headers))++")");
+```
+Terminate fcgi protocol and clear memory:
+```erlang
+fcgi_end()
+```
+
 
 ## 2. Advanced usage 
 
@@ -154,8 +157,13 @@ Module runnable as a process.
 
 Start new fcgi process and start connection with fcgi server
 ```erlang
-{ok, Pid} = sgi_fcgi:start(1,1), % FCGI_RESPONDER, FCGI_KEEP_CONN
+{ok, Pid} = sgi_fcgi:start(1,1), % (FCGI_RESPONDER, FCGI_KEEP_CONN)
 ```
+Send message
+```erlang
+Pid ! {overall, self(), FCGIParams, has_body(Http), Body},
+```
+Or if you need more flexibility you can use next 3 commands:
 Send Params to server, this is pair of `{Key,Value}`
 ```erlang 
 sgi_fcgi:params(Pid, FCGIParams),
@@ -235,4 +243,12 @@ handle_info({socket_error, Data}, State)
 
 ```erlang
 sgi_arbiter:free(PoolPid),
+```
+
+##### Or easy way if you want Just Send data and just receive message
+
+For example you want send quick(test) message and you do not want write many codes
+
+```erlang
+{ok, Bin} = sgi_pool:jsend(Request),
 ```

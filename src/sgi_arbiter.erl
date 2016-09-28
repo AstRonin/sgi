@@ -55,7 +55,7 @@ alloc() ->
 alloc(0) ->
     {error, "Attempts have ended"};
 alloc(CountTry) ->
-    case gen_server:call(?SERVER, alloc, 1000) of
+    case gen_server:call(?SERVER, alloc, 600000) of % 10 minutes
         {ok, undefined} ->
             timer:sleep(100), % @todo add changing this number dynamically
             alloc(CountTry - 1);
