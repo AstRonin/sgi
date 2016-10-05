@@ -135,28 +135,21 @@ init([]) ->
 %%=============================================================
 %% Send management request and getting connection data of server
 %%=============================================================
-handle_call(?FCGI_GET_VALUES, {From, _Tag}, State) ->
+handle_call(?FCGI_GET_VALUES, {_From, _Tag}, State) ->
     Params = [{<<?FCGI_MAX_CONNS>>, <<>>}, {<<?FCGI_MAX_REQS>>, <<>>}, {<<?FCGI_MPXS_CONNS>>, <<>>}],
     Data = encode(?FCGI_GET_VALUES, 0, encode_pairs(Params)),
-    case ?ARBITER:alloc() of
-        {ok, PoolPid} ->
-            RetData =
-            case sgi_pool:once_call(PoolPid, Data) of
-                {ok, Return} -> Return;
-                {error, Reason} ->
-                    wf:error(?MODULE, "Request return error: ~p~n", [Reason]),
-                    <<>>
-            end,
-            ?ARBITER:free(PoolPid),
-            State1 = State#state{parent = From, req_id = 0, pool_pid = PoolPid},
-            case decode(RetData) of
-                {?FCGI_GET_VALUES_RESULT, Packet, _Rest} ->
-                    Pairs = decode_pairs(Packet),
-                    {reply, {ok, Pairs}, State1};
-                _ ->
-                    {reply, {ok, []}, State1}
-            end;
-        {error, _Reason} ->
+    RetData =
+    case sgi_pool:once_call(Data) of
+        {ok, Return} -> Return;
+        {error, Reason} ->
+            wf:error(?MODULE, "Request return error: ~p~n", [Reason]),
+            <<>>
+    end,
+    case decode(RetData) of
+        {?FCGI_GET_VALUES_RESULT, Packet, _Rest} ->
+            Pairs = decode_pairs(Packet),
+            {reply, {ok, Pairs}, State};
+        _ ->
             {reply, {ok, []}, State}
     end;
 

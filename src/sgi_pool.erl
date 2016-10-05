@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, start_link/1, start_link/2, once_call/2, jsend/1, settings/1, try_connect/1]).
+-export([start_link/0, start_link/1, start_link/2, once_call/1, settings/1, try_connect/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -45,8 +45,16 @@ start_link(Name) ->
 start_link(Name, Conf) ->
     gen_server:start_link(?MODULE, [Name, Conf], []).
 
-once_call(Pid, Request) ->
-    gen_server:call(Pid, {once, Request}).
+-spec once_call(binary()) -> {ok, binary()} | {error, term()}.
+once_call(Request) ->
+    case ?ARBITER:alloc() of
+        {ok, PoolPid} ->
+            Ret = gen_server:call(PoolPid, {once, Request}),
+            ?ARBITER:free(PoolPid),
+            Ret;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 settings(Pid) ->
     gen_server:call(Pid, get_settings).
@@ -54,11 +62,12 @@ settings(Pid) ->
 try_connect(Pid) ->
     gen_server:call(Pid, try_connect).
 
-jsend(Request) ->
-    {ok, PoolPid} = ?ARBITER:alloc(),
-    {ok, Bin} = gen_server:call(PoolPid, {jsend, Request}),
-    ?ARBITER:free(PoolPid),
-    {ok, Bin}.
+%%-spec jsend(binary()) -> {ok, binary()} | {error, term()}.
+%%jsend(Request) ->
+%%    {ok, PoolPid} = ?ARBITER:alloc(),
+%%    Ret = gen_server:call(PoolPid, {jsend, Request}),
+%%    ?ARBITER:free(PoolPid),
+%%    Ret.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -82,10 +91,9 @@ handle_call({once, Request}, _From, State) ->
             ok = gen_tcp:send(State1#state.socket, Request),
             case do_recv_once(State1) of
                 {ok, B} ->
-                    State2 = close(State1),
-                    {reply, {ok, B}, set_last_active_time(State2)};
+                    {reply, {ok, B}, set_last_active_time(close(State1))};
                 {error, Reason} ->
-                    {reply, {error, Reason}, set_last_active_time(State1)}
+                    {reply, {error, Reason}, set_last_active_time(close(State1))}
             end;
         {error, Reason, State1} ->
             wf:error(?MODULE, "Can't create Socket: ~p~n", [Reason]),
@@ -99,12 +107,12 @@ handle_call(try_connect, _From, State) ->
         {ok, State1} -> {reply, ok, State1};
         {error, _Reason, State1} -> {reply, error, State1}
     end;
-handle_call({jsend, Request}, _From, State) ->
-    {ok, State1} = connect(State, false),
-    ok = gen_tcp:send(State1#state.socket, Request),
-    {ok, Bin} = do_recv(State1, []),
-    State2 = close(State1),
-    {reply, {ok, Bin}, State2};
+%%handle_call({jsend, Request}, _From, State) ->
+%%    {ok, State1} = connect(State, false),
+%%    ok = gen_tcp:send(State1#state.socket, Request),
+%%    Ret = do_recv(State1, []),
+%%    State2 = close(State1),
+%%    {reply, Ret, State2};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -128,6 +136,9 @@ handle_info({send, Request, From}, State) ->
             wf:error(?MODULE, "Can't create Socket: ~p~n", [Reason]),
             {noreply, set_last_active_time(State2)}
     end;
+handle_info(close, State) ->
+    State1 = close(State),
+    {noreply, set_last_active_time(State1)};
 handle_info({tcp, Socket, Data}, State) ->
     State#state.from ! {socket_return, Data},
     inet:setopts(Socket, [{active, once}]),
