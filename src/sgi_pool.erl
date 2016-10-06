@@ -144,7 +144,7 @@ handle_info({tcp, Socket, Data}, State) ->
     inet:setopts(Socket, [{active, once}]),
     {noreply, set_last_active_time(State)};
 handle_info({tcp_closed, _Socket}, State) ->
-    wf:info(?MODULE, "TCP connection CLOSED with state: ~p~n", [State]),
+%%    wf:info(?MODULE, "TCP connection CLOSED with state: ~p~n", [State]),
     {noreply, set_last_active_time(State#state{socket = undefined})};
 handle_info({tcp_error, _Socket, Reason}, State) ->
     wf:info(?MODULE, "TCP connection got ERROR: ~p with state: ~p~n", [Reason, State]),

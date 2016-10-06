@@ -5,8 +5,8 @@
 -define(ARBITER, sgi_arbiter).
 
 
--define(CLIENTS_COUNT, 40).
--define(REQUESTS_COUNT, 50).
+-define(CLIENTS_COUNT, 20).
+-define(REQUESTS_COUNT, 100).
 -define(SERVER_DISTRIBUTION_PRIORITY_FILE, "server_distribution(priority).csv").
 -define(SERVER_DISTRIBUTION_BLURRED_FILE, "server_distribution(blurred).csv").
 
@@ -14,7 +14,7 @@ start() ->
     start_stat(),
     % waiting servers
     timer:sleep(2000),
-    start_client(?CLIENTS_COUNT).
+    start_client(?CLIENTS_COUNT, 3).
 
 start_stat() ->
     try
@@ -49,14 +49,19 @@ stat(Stat) ->
             stat([])
     end.
 
-start_client(0) ->
+start_client(0, _) ->
     wf:info(?MODULE,"Cliends started~n", []),
     ok;
-start_client(N) ->
+start_client(N,Doubled) ->
     spawn(?MODULE, client, [N]),
-    start_client(N-1).
+    case Doubled of
+        3 when N == trunc(?CLIENTS_COUNT*0.1) -> timer:sleep(100), start_client(?CLIENTS_COUNT*2, 2);
+        2 when N == trunc(?CLIENTS_COUNT*0.1) -> timer:sleep(300), start_client(?CLIENTS_COUNT*3, 1);
+        _ -> start_client(N-1, Doubled)
+    end.
 
 client(N) ->
+    erlang:yield(),
     send(?REQUESTS_COUNT, N).
 
 send(0, _) ->
@@ -68,6 +73,4 @@ send(N, ClientNum) ->
     PoolPid ! {send, <<"Hi server">>, self()},
     receive {socket_return, <<P:5/binary, _:3/binary, _/binary>>} -> stat_proc ! {port, P} after 10000 -> ok end,
     ?ARBITER:free(PoolPid),
-    % add delay for imitating load average
-    case ClientNum of CN when CN > (?CLIENTS_COUNT*0.5), CN < (?CLIENTS_COUNT*0.7) -> timer:sleep(300); _ -> ok end,
     send(N-1, ClientNum).

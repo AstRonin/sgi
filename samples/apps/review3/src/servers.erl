@@ -4,6 +4,7 @@
 -export([start/0, server/1]).
 
 -define(SERVER_PORTS, [10000,10001,10002,10003,10004,10005,10006,10007,10008,10009]).
+-define(SOCKET_COUNT, 5).
 
 start() ->
     start(?SERVER_PORTS).
@@ -11,7 +12,7 @@ start([H|T]) ->
     case gen_tcp:listen(H,[{active, true},binary]) of
         {ok, ListenSock} ->
             wf:info(?MODULE,"server started on port: ~p~n",[H]),
-            start_servers(2, ListenSock),
+            start_servers(?SOCKET_COUNT, ListenSock),
             start(T);
         {error,Reason} ->
             wf:error(?MODULE,"Server has not started: ~p~n",[Reason]),

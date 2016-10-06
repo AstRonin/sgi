@@ -53,7 +53,8 @@ Url:  http://localhost:8000/site.php
 
 ### Sample 3
 
-This sample show you how you can use only protocol TCP
+This sample show you how you can use TCP Client of this app.
+Thanks to the smart balancer Client can connect to any number of servers in different methods: `priority` or `blurred`.
 
 ##### Settup:
 
@@ -66,21 +67,21 @@ Change app in rebar.config:
 **{sub_dirs, [ "review" ]}**. -> **{sub_dirs, [ "review3" ]}**.
     
 Change following settings in `sys.config`. 
-Sample will start 10 servers with 2 processes.
-Client will connect with 2 sockets on each server.
+Sample will start 10 servers with 5 processes.
+Client will connect with 5 sockets on each server.
 
 ```erlang
 {servers, [
-    [{name, default}, {address, localhost}, {port, 10000}, {timeout, 60000}, {weight, 10}, {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa1},    {address, localhost}, {port, 10001}, {timeout, 60000}, {weight, 9},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa2},    {address, localhost}, {port, 10002}, {timeout, 60000}, {weight, 8},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa3},    {address, localhost}, {port, 10003}, {timeout, 60000}, {weight, 7},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa4},    {address, localhost}, {port, 10004}, {timeout, 60000}, {weight, 6},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa5},    {address, localhost}, {port, 10005}, {timeout, 60000}, {weight, 5},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa6},    {address, localhost}, {port, 10006}, {timeout, 60000}, {weight, 4},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa7},    {address, localhost}, {port, 10007}, {timeout, 60000}, {weight, 3},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa8},    {address, localhost}, {port, 10008}, {timeout, 60000}, {weight, 2},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}],
-    [{name, aaa9},    {address, localhost}, {port, 10009}, {timeout, 60000}, {weight, 1},  {start_connections, 2}, {max_connections, 2}, {max_fails, 5}, {failed_timeout, 60}]
+    [{name, default}, {address, localhost}, {port, 10000}, {timeout, 60000}, {weight, 10}, {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa1},    {address, localhost}, {port, 10001}, {timeout, 60000}, {weight, 9},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa2},    {address, localhost}, {port, 10002}, {timeout, 60000}, {weight, 8},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa3},    {address, localhost}, {port, 10003}, {timeout, 60000}, {weight, 7},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa4},    {address, localhost}, {port, 10004}, {timeout, 60000}, {weight, 6},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa5},    {address, localhost}, {port, 10005}, {timeout, 60000}, {weight, 5},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa6},    {address, localhost}, {port, 10006}, {timeout, 60000}, {weight, 4},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa7},    {address, localhost}, {port, 10007}, {timeout, 60000}, {weight, 3},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa8},    {address, localhost}, {port, 10008}, {timeout, 60000}, {weight, 2},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}],
+    [{name, aaa9},    {address, localhost}, {port, 10009}, {timeout, 60000}, {weight, 1},  {start_connections, 4}, {max_connections, 5}, {max_fails, 5}, {failed_timeout, 60}]
 ]},
 {balancing_method, priority}, %blurred or priority
 ```
@@ -98,6 +99,8 @@ Sample will create the two files: `server_distribution(priority).csv` and `serve
 which show difference between of two methods of connection balancing to a server.
 Open files in Excel(or other) and insert `XY(Scater)` graph.
 
+![priority](priority1.png)
+![priority](blurred1.png)
 
 ## 1. Basic usage
 
