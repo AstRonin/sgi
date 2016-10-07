@@ -97,9 +97,24 @@ Change in `sys.config` next `{balancing_method, blurred},`
 
 Sample will create the two files: `server_distribution(priority).csv` and `server_distribution(blurred).csv`
 which show difference between of two methods of connection balancing to a server.
-Open files in Excel(or other) and insert `XY(Scater)` graph.
+Open files in Excel(or other) and insert `XY(Scater)` graph:
 
 ![priority](priority1.png)
+Follow result with next weights: 
+
+Server port | Weight
+--- | ---
+10000 | 1
+10001 | 2
+10002 | 3
+10003 | 4
+10004 | 10
+10005 | 9
+10006 | 8
+10007 | 7
+10008 | 6
+10009 | 5
+![priority](priority2.png)
 ![priority](blurred1.png)
 
 ## 1. Basic usage
