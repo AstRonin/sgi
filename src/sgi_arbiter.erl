@@ -14,6 +14,7 @@
     free_all/0,
     list/0,
     map/0,
+    servers/0,
     down/2]).
 
 %% gen_server callbacks
@@ -75,6 +76,8 @@ list() ->
     gen_server:call(?SERVER, list).
 map() ->
     gen_server:call(?SERVER, map).
+servers() ->
+    gen_server:call(?SERVER, servers).
 
 down(Pid, FailedTimeout) ->
     gen_server:cast(?SERVER, {down, Pid, FailedTimeout}).
@@ -101,6 +104,8 @@ handle_call(list, _From, State) ->
     {reply, get_list(), State};
 handle_call(map, _From, State) ->
     {reply, get_map(), State};
+handle_call(servers, _From, State) ->
+    {reply, get_servers(), State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -256,6 +261,8 @@ get_list() ->
     wf:state(?PROC_LIST).
 get_map() ->
     wf:state(?PROC_MAP).
+get_servers() ->
+    wf:state(?PROC_BY_SERVER).
 
 -spec active() -> pid() | undefined.
 active() ->

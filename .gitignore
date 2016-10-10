@@ -10,3 +10,6 @@ rel/example_project
 .rebar
 sgi.iml
 .idea
+_build
+rebar3
+rebar.lock

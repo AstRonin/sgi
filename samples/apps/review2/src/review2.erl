@@ -1,4 +1,4 @@
--module(review).
+-module(review2).
 -behaviour(supervisor).
 -behaviour(application).
 -export([init/1, start/2, stop/1, main/1]).
@@ -6,11 +6,10 @@
 
 main(A)    -> mad:main(A).
 start()    -> start(normal,[]).
-start(_,_) -> supervisor:start_link({local,review},review,[]).
+start(_,_) -> supervisor:start_link({local,review2},review2,[]).
 stop(_)    -> ok.
 
-init([]) -> syn:init(),
-            fcgi(),
+init([]) -> fcgi(),
             {ok, {{one_for_one, 5, 10}, [spec()]}}.
 
 spec()   -> ranch:child_spec(http, 100, ranch_tcp, port(), cowboy_protocol, env()).

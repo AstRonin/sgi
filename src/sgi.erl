@@ -1,11 +1,14 @@
 -module(sgi).
 -compile(export_all).
 
+-spec pv(Key, List) -> term() when
+    Key :: term(),
+    List :: [term()].
+pv(K, L) -> pv(K, L, undefined).
 -spec pv(Key, List, Default) -> term() when
     Key :: term(),
     List :: [term()],
     Default :: term().
-pv(K, L) -> pv(K, L, undefined).
 pv(K, L, D) -> proplists:get_value(K, L, D).
 
 -spec ct(TimerRef) -> Result | ok when
