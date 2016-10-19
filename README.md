@@ -4,7 +4,7 @@ Application written on Erlang. General design principles is fast, low memory and
 
 SGI give possibility simple and smart way to connect to any server by [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol)
 and have other protocols working under TCP, first of all this is [FastCGI](https://en.wikipedia.org/wiki/FastCGI). This protocol, 
-for example, used for connect to PHP (FPM).
+for example, used for connect to PHP (using [FPM](http://php.net/manual/en/install.fpm.php)) or to Python (using [uWSGI](http://uwsgi-docs.readthedocs.io/en/latest/Options.html#fastcgi-socket)).
 
 ## Try Sample
 ### Sample 1
