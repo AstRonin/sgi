@@ -22,13 +22,8 @@ start_link() ->
     Conf :: [tuple()]. % list from sys.config
 start_pool_children(Num, Conf) when is_integer(Num) andalso Num > 0 ->
     ChildSpecs = make_pool_spec(Num, Conf, []),
-    start_pool_children(ChildSpecs);
+    [supervisor:start_child(?SERVER, ChildSpec) || ChildSpec <- ChildSpecs];
 start_pool_children(_,_) -> ok.
-
-start_pool_children([H|T]) ->
-    supervisor:start_child(?SERVER, H),
-    start_pool_children(T);
-start_pool_children([]) -> ok.
 
 start_child(N, A) ->
     supervisor:start_child(?MODULE, #{id => N, start => {N, start_link, [A]}}).

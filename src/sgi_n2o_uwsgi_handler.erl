@@ -1,11 +1,10 @@
--module(sgi_n2o_fcgi_handler).
+-module(sgi_n2o_uwsgi_handler).
 -include_lib("n2o/include/wf.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
 %% API
 -export([init/0, send/0, send/1, stop/0]).
 
--define(PROTO_CGI, <<"CGI/1.1">>).
 -define(PROTO_HTTP, <<"HTTP/1.1">>).
 -define(DEF_RESP_STATUS, 200).
 -define(DEF_TIMEOUT, 600000).
@@ -40,12 +39,12 @@ send(Http) ->
     {_, Body} = bs(Http),
     CGIParams = get_params(Http),
 
-    {ok, Pid} = sgi_fcgi:start(),
+    {ok, Pid} = sgi_uwsgi:start(),
     Pid ! {overall, self(), CGIParams, has_body(Http), Body},
     Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
     Ret = ret(),
     sgi:ct(Timer),
-    sgi_fcgi:stop(Pid),
+    sgi_uwsgi:stop(Pid),
     RetH = get_response_headers(),
     set_header_to_cowboy(RetH, 0),
     terminate(),
@@ -92,8 +91,7 @@ get_params(Http) ->
     %% HHttps = case HTTPS ? of <<"https">> -> [{<<"HTTPS">>, <<"'on'">>}]; _ -> [] end,
     HHttps = [],
 
-    [{<<"GATEWAY_INTERFACE">>, ?PROTO_CGI},
-        {<<"QUERY_STRING">>, QS},
+    [{<<"QUERY_STRING">>, QS},
         {<<"REMOTE_ADDR">>, wf:to_binary(inet:ntoa(PeerIP))},
         {<<"REMOTE_PORT">>, wf:to_binary(PeerPort)},
         {<<"REQUEST_METHOD">>, method(Http)},
@@ -101,7 +99,8 @@ get_params(Http) ->
         {<<"DOCUMENT_ROOT">>, wf:to_binary(Root)},
         {<<"SCRIPT_FILENAME">>, wf:to_binary([vhost(root), FPath, "/", FScript])},
         {<<"SCRIPT_NAME">>, wf:to_binary(["/", FScript])},
-        %% {<<"SERVER_ADDR">>, <<"">>}, % I don't now how cowboy return self ip
+        {<<"PATH_INFO">>, wf:to_binary(["/", FScript])},
+        {<<"SERVER_ADDR">>, <<"">>}, % I don't now how cowboy return self ip
         {<<"SERVER_NAME">>, wf:to_binary(vhost(server_name, wf:config(sgi, address, "")))},
         {<<"SERVER_PORT">>, wf:to_binary(port())},
         {<<"SERVER_PROTOCOL">>, ?PROTO_HTTP},
@@ -109,7 +108,11 @@ get_params(Http) ->
         path_info_headers(Root, FPathInfo) ++
         HHttps ++
         http_headers(Http) ++
-        post_headers(Http).
+        post_headers(Http) ++
+        [
+%%            {<<"CONTENT_TYPE">>, <<"application/x-www-form-urlencoded">>},
+%%            {<<"CONTENT_LENGTH">>, wf:to_binary(20)}
+        ].
 
 -spec make_ws_url_parts(http()) -> ok.
 make_ws_url_parts(#http{url = undefined}) ->
@@ -335,7 +338,7 @@ ret() ->
             wf:state(status, 503),
             [];
         {sgi_fcgi_timeout, Pid} ->
-            sgi_fcgi:stop(Pid),
+            sgi_uwsgi:stop(Pid),
             wf:error(?MODULE, "Connect timeout to FastCGI ~n", []),
             set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
             wf:state(status, 503),
@@ -442,5 +445,5 @@ terminate() ->
     wf:state(sgi_n2o_fcgi_body_length, undefined),
     wf:state(sgi_n2o_fcgi_response_headers, #response_headers{}),
 
-    sgi_fcgi:stop(wf:state(sgi_n2o_fcgi_sgi_fcgi)),
+    sgi_uwsgi:stop(wf:state(sgi_n2o_fcgi_sgi_fcgi)),
     wf:state(sgi_n2o_fcgi_sgi_fcgi, undefined).

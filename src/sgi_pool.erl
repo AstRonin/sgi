@@ -45,20 +45,35 @@ start_link(Name) ->
 start_link(Name, Conf) ->
     gen_server:start_link(?MODULE, [Name, Conf], []).
 
+%%
+%% Simple and small request.
+%% Send request to a server, receive only one response, and free a socket
+%%
 -spec once_call(binary()) -> {ok, binary()} | {error, term()}.
 once_call(Request) ->
     case ?ARBITER:alloc() of
         {ok, PoolPid} ->
-            Ret = gen_server:call(PoolPid, {once, Request}),
+            Ret = try
+                gen_server:call(PoolPid, {once, Request})
+            catch
+                _:Reason ->
+                    {error, Reason}
+            end,
             ?ARBITER:free(PoolPid),
             Ret;
         {error, Reason} ->
             {error, Reason}
     end.
 
+%%
+%% Getting settings of this connection for control
+%%
 settings(Pid) ->
     gen_server:call(Pid, get_settings).
 
+%%
+%% Checking connect to a server
+%%
 try_connect(Pid) ->
     gen_server:call(Pid, try_connect).
 
@@ -118,11 +133,14 @@ handle_call(_Request, _From, State) ->
 
 handle_cast(_Request, State) ->
     {noreply, State}.
-
+%%
+%% Send msg
+%%
 handle_info({send, Request, From}, State) ->
     State1 = State#state{from = From},
     case connect(State1) of
         {ok, State2} ->
+%%            wf:info(?MODULE, "Send data from pool to uwsgi: ~p~n", [Request]),
             case gen_tcp:send(State2#state.socket, Request) of
                 ok ->
                     {noreply, set_last_active_time(State2)};
@@ -136,16 +154,25 @@ handle_info({send, Request, From}, State) ->
             wf:error(?MODULE, "Can't create Socket: ~p~n", [Reason]),
             {noreply, set_last_active_time(State2)}
     end;
-handle_info(close, State) ->
-    State1 = close(State),
-    {noreply, set_last_active_time(State1)};
+
+%%
+%% Receive msg
+%%
 handle_info({tcp, Socket, Data}, State) ->
     State#state.from ! {socket_return, Data},
     inet:setopts(Socket, [{active, once}]),
     {noreply, set_last_active_time(State)};
+
+%%
+%% Receive msg about connection was closed
+%%
 handle_info({tcp_closed, _Socket}, State) ->
 %%    wf:info(?MODULE, "TCP connection CLOSED with state: ~p~n", [State]),
     {noreply, set_last_active_time(State#state{socket = undefined})};
+
+%%
+%%  Receive msg about connection had errors
+%%
 handle_info({tcp_error, _Socket, Reason}, State) ->
     wf:info(?MODULE, "TCP connection got ERROR: ~p with state: ~p~n", [Reason, State]),
     {noreply, set_last_active_time(State#state{socket = undefined})};
@@ -157,6 +184,13 @@ handle_info(hibernate, State) ->
         _ ->
             {noreply, State}
     end;
+
+%%
+%% Close connection
+%%
+handle_info(close, State) ->
+    State1 = close(State),
+    {noreply, set_last_active_time(State1)};
 handle_info(send_alive, State) -> % @todo it obtains overload if more than 1000 processes will send this message
     case sgi:is_alive(sgi_arbiter) of
         true -> sgi_arbiter:new_pool_started(self());
@@ -179,6 +213,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 connect(State) -> connect(State, once).
 
+%%
+%% Process is trying to connect to a server.
+%% Process will close previous connection if need connect by passive mode.
+%%
 -spec connect(#state{}, tcp_active_type()) -> {ok, State :: #state{}} | {error, Reason :: term(), State :: #state{}}.
 connect(State = #state{socket = undefined, address = Address, port = Port}, Active) ->
     case gen_tcp:connect(Address, Port, [binary, {active, Active}], State#state.timeout) of
@@ -202,6 +240,7 @@ connect(State = #state{socket = Socket}, Active) ->
             {ok, State}
     end.
 
+-spec close(#state{}) -> #state{}.
 close(State) when State#state.socket /= undefined ->
     gen_tcp:close(State#state.socket),
     State#state{socket = undefined};
@@ -217,6 +256,10 @@ do_recv(State, Bs) ->
             {error, Reason}
     end.
 
+%%
+%% Receive only one msg
+%%
+-spec do_recv_once(#state{}) -> {ok, term()} | {error, term()}.
 do_recv_once(State) ->
     case gen_tcp:recv(State#state.socket, 0) of
         {ok, B} ->
@@ -225,9 +268,14 @@ do_recv_once(State) ->
             {error, Reason}
     end.
 
+-spec set_last_active_time(#state{}) -> #state{}.
 set_last_active_time(State) ->
     State#state{last_active_time = sgi:time_now()}.
 
+%%
+%% Tell arbiter what connection is fail
+%%
+-spec overage_fail_conns(#state{}) -> #state{}.
 overage_fail_conns(State) ->
     case State#state.fails >= State#state.max_fails of
         true ->
