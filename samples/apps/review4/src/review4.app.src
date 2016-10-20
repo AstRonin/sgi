@@ -1,0 +1,9 @@
+{application, review4,
+ [
+  {description, "N2O Review 4 Application"},
+  {vsn, "2.9"},
+  {registered, []},
+  {applications, [kernel, stdlib, n2o, sgi]},
+  {mod, { review4, []}},
+  {env, []}
+ ]}.

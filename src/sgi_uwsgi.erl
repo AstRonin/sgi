@@ -16,6 +16,12 @@
 
 -define(SERVER, ?MODULE).
 
+-define(MODIFIER1_BASE, 0).
+-define(MODIFIER1_PING, 100).
+
+-define(MODIFIER2_BASE, 0).
+-define(MODIFIER2_PONG, 1).
+
 -define(ARBITER, sgi_arbiter).
 -define(REQUEST_ID_MAX, 65535).
 
@@ -39,7 +45,6 @@ init_uwsgi() ->
     ok.
 
 end_uwsgi() ->
-    wf:info(?MODULE, "fcgi ended: ~n", []),
     ok.
 
 %%%===================================================================
@@ -53,7 +58,7 @@ init([]) ->
 %% Send management request and getting connection data of server
 %%=============================================================
 %%handle_call(?FCGI_GET_VALUES, {_From, _Tag}, State) ->
-%%    Data = encode(100, 0, <<>>),
+%%    Data = encode(?MODIFIER1_PING, ?MODIFIER2_BASE, <<>>),
 %%
 %%    wf:info(?MODULE, "Send test data to uwsgi: ~p~n", [Data]),
 %%
@@ -77,8 +82,7 @@ handle_info({overall, From, Params, HasBody, Body}, State) ->
     case ?ARBITER:alloc() of
         {ok, PoolPid} ->
 %%            Data1 = encode(99, 0, <<>>),
-            Data = encode(0, 0, encode_pairs(Params)), % @todo What is modifier1 - 30 ???
-%%            wf:info(?MODULE, "Send data to uwsgi: ~p~n", [Data]),
+            Data = encode(?MODIFIER1_BASE, ?MODIFIER2_BASE, encode_pairs(Params)), % @todo What is modifier1 - 30 ???
             case HasBody of
                 true ->
                     PoolPid ! {send, <<Data/binary, Body/binary>>, self()};
@@ -96,11 +100,10 @@ handle_info({overall, From, Params, HasBody, Body}, State) ->
 %%===================================
 
 handle_info({socket_return, Data}, State) ->
-    wf:info(?MODULE, "Return from uwsgi: ~p~n", [Data]),
     State1 = send_back(Data, State),
     {noreply, State1};
 handle_info({socket_error, Data}, State) ->
-    State#state.parent ! {sgi_fcgi_return_error, Data},
+    State#state.parent ! {sgi_uwsgi_return_error, Data},
     {noreply, State};
 
 
@@ -147,51 +150,8 @@ encode_pair({N, V}) ->
 send_back(<<>>, State) ->
     State;
 send_back(Data, State) ->
-%%send_back(Data, State = #state{buff = B}) ->
-%%    Data1 = <<B/binary, Data/binary>>,
-
-    State#state.parent ! {sgi_fcgi_return, Data, <<>>},
-    State#state.parent ! sgi_fcgi_return_end,
+    State#state.parent ! {sgi_uwsgi_return, Data, <<>>},
     State.
-
-%%    case decode(Data1) of
-%%        {?FCGI_STDERR, E, Rest} ->
-%%%%            wf:info(?MODULE, "socket_return, FCGI_STDERR: ~p~n", [E]),
-%%            State#state.parent ! {sgi_fcgi_return, <<>>, stream_body(E)},
-%%            send_back(Rest, State#state{buff = <<>>});
-%%        {?FCGI_STDOUT, Packet, Rest} ->
-%%            State#state.parent ! {sgi_fcgi_return, Packet, <<>>},
-%%            send_back(Rest, State#state{buff = <<>>});
-%%        {?FCGI_DATA, Packet, Rest} ->
-%%            State#state.parent ! {sgi_fcgi_return, Packet, <<>>},
-%%            send_back(Rest, State#state{buff = <<>>});
-%%        {?FCGI_END_REQUEST, <<_AppStatus:32, _ProtocolStatus, _Reserved:24>>, Rest} ->
-%%%%            wf:info(?MODULE, "socket_return, FCGI_END_REQUEST, AppStatus:~p~n, ProtocolStatus:~p~n", [AppStatus, ProtocolStatus]),
-%%            State#state.parent ! sgi_fcgi_return_end,
-%%            del_req(State#state.req_id),
-%%            send_back(Rest, State#state{buff = <<>>, req_id = 0});
-%%        more ->
-%%            State#state{buff = Data1};
-%%        <<>> ->
-%%            State
-%%    end.
-
-%%decode(<<>>) ->
-%%    <<>>;
-%%decode(Data) ->
-%%    io:format("decode_packet ~p~n", [erlang:decode_packet(raw, Data, [])]),
-%%    case erlang:decode_packet(raw, Data, []) of
-%%%%    case erlang:decode_packet(fcgi, Data, []) of
-%%        {ok, <<Modifier1, PacketLength:16/little, Modifier2, Packet:PacketLength/binary>>, Rest} ->
-%%            io:format("Modifier2 ~p~n", [Modifier2]),
-%%            {Modifier1, Packet, Rest};
-%%        {more, undefined} ->
-%%            more;
-%%        {more, _More} ->
-%%            more;
-%%        {error, invalid} ->
-%%            <<>>
-%%    end.
 
 decode_pairs(B) -> decode_pairs(B, []).
 decode_pairs(<<>>, Pairs) -> lists:reverse(Pairs);
@@ -205,8 +165,3 @@ decode_struct(<<L:16/little,  B/binary>>) ->
 decode_struct(<<L:16/little,  B/binary>>, K) ->
     <<V:L/binary, B1/binary>> = B,
     {ok, {K,V}, B1}.
-
-stream_body(<<>>) ->
-    eof;
-stream_body(Bin) ->
-    Bin.

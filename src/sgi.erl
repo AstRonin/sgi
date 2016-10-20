@@ -26,3 +26,14 @@ is_alive(_) -> false.
 -spec time_now() -> non_neg_integer().
 time_now() ->
     erlang:system_time(seconds).
+
+inc_state(K, Num) ->
+    case wf:state(K) of
+        undefined ->
+            wf:state(K, Num),
+            Num;
+        S when is_number(S) ->
+            wf:state(K, S+Num),
+            S+Num;
+        _ -> ok
+    end.

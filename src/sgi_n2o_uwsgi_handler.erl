@@ -9,7 +9,7 @@
 -define(DEF_RESP_STATUS, 200).
 -define(DEF_TIMEOUT, 600000).
 
--define(WS_URL_PARTS, (get(sgi_n2o_fcgi_ws_url_parts))).
+-define(WS_URL_PARTS, (get(sgi_n2o_uwsgi_ws_url_parts))).
 
 -type http() :: #http{}.
 -type htuple() :: {binary(), binary()}.
@@ -41,7 +41,7 @@ send(Http) ->
 
     {ok, Pid} = sgi_uwsgi:start(),
     Pid ! {overall, self(), CGIParams, has_body(Http), Body},
-    Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
+    Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_uwsgi_timeout, Pid}),
     Ret = ret(),
     sgi:ct(Timer),
     sgi_uwsgi:stop(Pid),
@@ -116,15 +116,15 @@ get_params(Http) ->
 
 -spec make_ws_url_parts(http()) -> ok.
 make_ws_url_parts(#http{url = undefined}) ->
-    wf:state(sgi_n2o_fcgi_ws_url_parts, #ws_url_parts{}), ok;
+    wf:state(sgi_n2o_uwsgi_ws_url_parts, #ws_url_parts{}), ok;
 make_ws_url_parts(#http{url = Url}) ->
     case http_uri:parse(wf:to_list(Url), [{scheme_defaults, [
         {http,80},{https,443},{ftp,21},{ssh,22},{sftp,22},{tftp,69},{ws,80},{wss,443}]}]) of
         {ok, {Scheme, UserInfo, Host, Port, Path, Query}} ->
             R = #ws_url_parts{scheme=Scheme,userInfo=UserInfo,host=Host,port=Port,path=Path,query=Query},
-            wf:state(sgi_n2o_fcgi_ws_url_parts, R), ok;
+            wf:state(sgi_n2o_uwsgi_ws_url_parts, R), ok;
         {error, _Reason} ->
-            wf:state(sgi_n2o_fcgi_ws_url_parts, #ws_url_parts{}), ok
+            wf:state(sgi_n2o_uwsgi_ws_url_parts, #ws_url_parts{}), ok
     end.
 
 -spec external_headers(http()) -> list().
@@ -189,7 +189,7 @@ has_body(Http) ->
 
 -spec body_length() -> non_neg_integer().
 body_length() ->
-    case wf:state(sgi_n2o_fcgi_body_length) of
+    case wf:state(sgi_n2o_uwsgi_body_length) of
         L when is_integer(L) -> L;
         _ ->
             case cowboy_req:body_length(?REQ) of
@@ -227,7 +227,7 @@ bs(#http{body = B}) when B =:= <<>> orelse B =:= "" ->
     {empty, <<>>};
 bs(#http{body = B} = Http) ->
     case has_body(Http) of
-        true -> wf:state(sgi_n2o_fcgi_body_length, byte_size(B)), {ok, B};
+        true -> wf:state(sgi_n2o_uwsgi_body_length, byte_size(B)), {ok, B};
         _ -> {empty, <<>>}
     end.
 
@@ -327,30 +327,45 @@ rewrite(Subject, []) ->
 
 -spec ret() -> iolist().
 ret() ->
-    receive
-        {sgi_fcgi_return, Out, _Err} ->
-            stdout(Out);
-        sgi_fcgi_return_end ->
-            [];
-        {sgi_fcgi_return_error, Err} ->
-            wf:error(?MODULE, "Connection error ~p~n", [Err]),
-            set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
-            wf:state(status, 503),
-            [];
-        {sgi_fcgi_timeout, Pid} ->
-            sgi_uwsgi:stop(Pid),
-            wf:error(?MODULE, "Connect timeout to FastCGI ~n", []),
-            set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
-            wf:state(status, 503),
-            []
+    case check_ret_content_length() of
+        true -> [];
+        _ ->
+            receive
+                {sgi_uwsgi_return, Out, _Err} ->
+                    stdout(Out);
+                {sgi_uwsgi_return_error, Err} ->
+                    wf:error(?MODULE, "Connection error ~p~n", [Err]),
+                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
+                    wf:state(status, 503),
+                    [];
+                {sgi_uwsgi_timeout, Pid} ->
+                    sgi_uwsgi:stop(Pid),
+                    wf:error(?MODULE, "Connect timeout to FastCGI ~n", []),
+                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
+                    wf:state(status, 503),
+                    []
+            end
+    end.
+
+check_ret_content_length() ->
+    case get_response_headers_ended() of
+        true ->
+            CL = wf:to_integer(get_response_header(<<"Content-Length">>)),
+            RL = wf:state(sgi_n2o_uwsgi_ret_length),
+            RL >= CL;
+        _ ->
+            false
     end.
 
 -spec stdout(list()) -> iolist().
 stdout(Data) ->
     case get_response_headers_ended() of
-        true -> [Data | ret()];
+        true ->
+            sgi:inc_state(sgi_n2o_uwsgi_ret_length, size(Data)),
+            [Data | ret()];
         _ ->
             {ok, Hs, B} = decode_result(Data),
+            sgi:inc_state(sgi_n2o_uwsgi_ret_length, size(B)),
             case Hs of [] -> skip; _ -> update_response_headers(Hs) end,
             [B | ret()]
     end.
@@ -358,14 +373,17 @@ stdout(Data) ->
 update_response_headers(Hs) ->
     update_response_headers(Hs, false).
 update_response_headers(Hs, Status) ->
-    RespH1 = case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> #response_headers{}; RespH -> RespH end,
+    RespH1 = case wf:state(sgi_n2o_uwsgi_response_headers) of undefined -> #response_headers{}; RespH -> RespH end,
     Status1 = case RespH1#response_headers.ended of true -> true; _ -> Status end,
     RespH2 = RespH1#response_headers{buff = lists:append([Hs, RespH1#response_headers.buff]), ended = Status1},
-    wf:state(sgi_n2o_fcgi_response_headers, RespH2).
+    wf:state(sgi_n2o_uwsgi_response_headers, RespH2).
 get_response_headers() ->
-    case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> []; H -> lists:reverse(H#response_headers.buff) end.
+    case wf:state(sgi_n2o_uwsgi_response_headers) of undefined -> []; H -> lists:reverse(H#response_headers.buff) end.
 get_response_headers_ended() ->
-    case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> false; H -> H#response_headers.ended end.
+    case wf:state(sgi_n2o_uwsgi_response_headers) of undefined -> false; H -> H#response_headers.ended end.
+get_response_header(K) ->
+    sgi:pv(K, get_response_headers(), <<>>).
+
 
 -spec decode_result(Data) -> {ok, Headers, Body} | {error, term()} when
     Data :: binary(),
@@ -381,8 +399,16 @@ decode_result(Data, AccH) ->
             {ok, AccH, Rest};
         {ok, {http_header,_,<<"X-CGI-",_NameRest>>,_,_Value}, Rest} -> decode_result(Rest, AccH);
         {ok, {http_header,_Len,Field,_,Value}, Rest} -> decode_result(Rest, [{wf:to_binary(Field),Value} | AccH]);
-        {ok, {http_error,_Value}, Rest} ->
-            case get_response_headers() of [] -> decode_result(Rest, []); _ -> {ok, AccH, Data} end;
+        {ok, {http_error,Value}, Rest} ->
+            case get_response_headers() of
+                [] ->
+                    Rep = binary:replace(Value,<<"\r\n">>,<<"">>),
+                    Tokens = string:tokens(wf:to_list(Rep), " "),
+                    Status = wf:to_binary(string:join(lists:nthtail(1,Tokens), " ")),
+                    decode_result(Rest, [{<<"Status">>,Status} | AccH]);
+                _ ->
+                    {ok, AccH, Data}
+            end;
         {more, undefined} -> {ok, AccH, Data};
         {more, _} -> {ok, [], Data};
         {error, R} -> {error, R}
@@ -441,9 +467,7 @@ to_upper(V) ->
 
 terminate() ->
     wf:state(vhost, []),
-    wf:state(sgi_n2o_fcgi_ws_url_parts, undefined),
-    wf:state(sgi_n2o_fcgi_body_length, undefined),
-    wf:state(sgi_n2o_fcgi_response_headers, #response_headers{}),
-
-    sgi_uwsgi:stop(wf:state(sgi_n2o_fcgi_sgi_fcgi)),
-    wf:state(sgi_n2o_fcgi_sgi_fcgi, undefined).
+    wf:state(sgi_n2o_uwsgi_ws_url_parts, undefined),
+    wf:state(sgi_n2o_uwsgi_body_length, undefined),
+    wf:state(sgi_n2o_uwsgi_ret_length, undefined),
+    wf:state(sgi_n2o_uwsgi_response_headers, #response_headers{}).

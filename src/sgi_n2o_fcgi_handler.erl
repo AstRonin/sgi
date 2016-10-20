@@ -363,6 +363,8 @@ get_response_headers() ->
     case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> []; H -> lists:reverse(H#response_headers.buff) end.
 get_response_headers_ended() ->
     case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> false; H -> H#response_headers.ended end.
+get_response_header(K) ->
+    sgi:pv(K, get_response_headers(), <<>>).
 
 -spec decode_result(Data) -> {ok, Headers, Body} | {error, term()} when
     Data :: binary(),
@@ -378,8 +380,16 @@ decode_result(Data, AccH) ->
             {ok, AccH, Rest};
         {ok, {http_header,_,<<"X-CGI-",_NameRest>>,_,_Value}, Rest} -> decode_result(Rest, AccH);
         {ok, {http_header,_Len,Field,_,Value}, Rest} -> decode_result(Rest, [{wf:to_binary(Field),Value} | AccH]);
-        {ok, {http_error,_Value}, Rest} ->
-            case get_response_headers() of [] -> decode_result(Rest, []); _ -> {ok, AccH, Data} end;
+        {ok, {http_error,Value}, Rest} ->
+            case get_response_headers() of
+                [] ->
+                    Rep = binary:replace(Value,<<"\r\n">>,<<"">>),
+                    Tokens = string:tokens(wf:to_list(Rep), " "),
+                    Status = wf:to_binary(string:join(lists:nthtail(1,Tokens), " ")),
+                    decode_result(Rest, [{<<"Status">>,Status} | AccH]);
+                _ ->
+                    {ok, AccH, Data}
+            end;
         {more, undefined} -> {ok, AccH, Data};
         {more, _} -> {ok, [], Data};
         {error, R} -> {error, R}
@@ -440,7 +450,4 @@ terminate() ->
     wf:state(vhost, []),
     wf:state(sgi_n2o_fcgi_ws_url_parts, undefined),
     wf:state(sgi_n2o_fcgi_body_length, undefined),
-    wf:state(sgi_n2o_fcgi_response_headers, #response_headers{}),
-
-    sgi_fcgi:stop(wf:state(sgi_n2o_fcgi_sgi_fcgi)),
-    wf:state(sgi_n2o_fcgi_sgi_fcgi, undefined).
+    wf:state(sgi_n2o_fcgi_response_headers, #response_headers{}).
