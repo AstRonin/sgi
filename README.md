@@ -3,8 +3,14 @@
 Application written on Erlang. General design principles is fast, low memory and modularity.
 
 SGI give possibility simple and smart way to connect to any server by [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol)
-and have other protocols working under TCP, first of all this is [FastCGI](https://en.wikipedia.org/wiki/FastCGI). This protocol, 
-for example, used for connect to PHP (FPM).
+and have other protocols working under TCP.
+It supports the two protocols:
+- [FastCGI](https://en.wikipedia.org/wiki/FastCGI). This protocol is common for connect to [PHP (FPM)](http://php.net/manual/en/install.fpm.php).
+- [uwsgi](https://uwsgi-docs.readthedocs.io/en/latest/Protocol.html). This protocol is the native protocol used by the [uWSGI](https://uwsgi-docs.readthedocs.io) server.
+
+## Requirements
+   
+   Erlang 18.1+
 
 ## Try Sample
 ### Sample 1
@@ -43,6 +49,14 @@ Change app in rebar.config:
 
     $ vim samples/apps/rebar.config
 **{sub_dirs, [ "review" ]}**. -> **{sub_dirs, [ "review2" ]}**.
+
+Change app in sys.config:
+
+**{n2o, [{app,review2}]}**
+
+Run FPM:
+
+    $ sudo service php5-fpm start
     
 Run Server:
 
@@ -52,6 +66,41 @@ Run Server:
 Url:  http://localhost:8000/site.php
 
 ### Sample 3
+
+This sample show you how you can run your site (wrote in Python and support **uwsgi** protocol) with support WebSocket.
+For this you need use server [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/).
+
+##### Settup:
+
+    $ git clone git://github.com/astronin/sgi
+    $ cd sgi/samples
+    
+Change app in rebar.config:
+
+    $ vim samples/apps/rebar.config
+**{sub_dirs, [ "review" ]}**. -> **{sub_dirs, [ "review3" ]}**.
+
+Change app in sys.config:
+
+```erlang
+{n2o, [{app,review3}]},
+{sgi, [{servers, [
+    [{name, default}, {address, localhost}, {port, 3031}]
+]}]}
+```
+
+Run uWSGI:
+
+    $ uwsgi --socket 127.0.0.1:3031 --wsgi-file <your path clone>sgi/samples/cgi-scripts/python/myapp.py
+
+Run Server:
+
+    $ ./mad deps compile plan
+    $ ./mad repl
+
+Url:  http://localhost:8000/
+
+### Sample 4
 
 This sample show you how you can use TCP Client of this app.
 Thanks to the smart balancer Client can connect to any number of servers in different methods: `priority` or `blurred`.
@@ -64,8 +113,12 @@ Thanks to the smart balancer Client can connect to any number of servers in diff
 Change app in rebar.config:
 
     $ vim samples/apps/rebar.config
-**{sub_dirs, [ "review" ]}**. -> **{sub_dirs, [ "review3" ]}**.
-    
+**{sub_dirs, [ "review" ]}**. -> **{sub_dirs, [ "review4" ]}**.
+
+Change app in sys.config:
+
+**{n2o, [{app,review4}]}**
+
 Change following settings in `sys.config`. 
 Sample will start 10 servers with 5 processes.
 Client will connect with 5 sockets on each server.
@@ -162,7 +215,10 @@ Add follow section to sys.config
     - `max_connections` - number of max connections to a server, they will be added if will be necessary, created dynamically (default - 1)
     - `max_fails` - the number of unsuccessful attempts to connect to a server (default - 10)
     - `failed_timeout` - the number in seconds after which a connection will try reuse
-- `balancing_method` - set the method for balancing, can be **priority** or **blurred**. 
+- `balancing_method` - set the method for balancing, can be 
+    - **priority** (like **Weighted Round Robin**)
+    - **blurred**
+    
     Method  **priority** based on **weight** of server and send data, firstly, 
     on the connections of this server. The connections of first server 
     in configuration will be in begin of queue, if a weight of servers will equal.
@@ -317,5 +373,5 @@ sgi_arbiter:free(PoolPid),
 For example you want send quick(test) message and you do not want write many codes
 
 ```erlang
-{ok, Bin} = sgi_pool:jsend(Request),
+{ok, Bin} = sgi_pool:once_call(Request),
 ```
