@@ -15,6 +15,7 @@
     list/0,
     map/0,
     servers/0,
+    not_av/0,
     down/2]).
 
 %% gen_server callbacks
@@ -52,13 +53,13 @@ start_link(A) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [A], []).
 
 alloc() ->
-    alloc(300).
+    alloc(3000).
 alloc(0) ->
     {error, "Attempts have ended"};
 alloc(CountTry) ->
-    case gen_server:call(?SERVER, alloc, 600000) of % 10 minutes
+    case gen_server:call(?SERVER, alloc, 300000) of % 10 minutes
         {ok, undefined} ->
-            timer:sleep(100), % @todo add changing this number dynamically
+            timer:sleep(10), % @todo add changing this number dynamically
             alloc(CountTry - 1);
         {ok, Pid} -> {ok, Pid}
     end.
@@ -78,6 +79,8 @@ map() ->
     gen_server:call(?SERVER, map).
 servers() ->
     gen_server:call(?SERVER, servers).
+not_av() ->
+    gen_server:call(?SERVER, not_av).
 
 down(Pid, FailedTimeout) ->
     gen_server:cast(?SERVER, {down, Pid, FailedTimeout}).
@@ -106,8 +109,10 @@ handle_call(map, _From, State) ->
     {reply, get_map(), State};
 handle_call(servers, _From, State) ->
     {reply, get_servers(), State};
+handle_call(not_av, _From, State) ->
+    {reply, get_not_av(), State};
 handle_call(_Request, _From, State) ->
-    {reply, ok, State}.
+{reply, ok, State}.
 
 
 handle_cast({down, Pid, FailedTimeout}, State) ->
@@ -263,6 +268,10 @@ get_map() ->
     wf:state(?PROC_MAP).
 get_servers() ->
     wf:state(?PROC_BY_SERVER).
+get_not_av() ->
+    M = wf:state(?PROC_MAP),
+    Pred = fun(K,V) -> V#proc.status == ?NOTAVAILABLE end,
+    maps:filter(Pred,M).
 
 -spec active() -> pid() | undefined.
 active() ->

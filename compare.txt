@@ -1,0 +1,327 @@
+$ ab -n 16000 -c 100 -T "application/x-www-form-urlencoded" -p "sgi_post.txt" http://localhost:8000/site.php
+
+
+        nginx
+
+
+    Document Length:        38519 bytes
+    Concurrency Level:      100
+    Time taken for tests:   28.360 seconds
+    Complete requests:      16000
+    Failed requests:        0
+    Total transferred:      618624000 bytes
+    Total body sent:        1156752000
+    HTML transferred:       616304000 bytes
+    Requests per second:    564.18 [#/sec] (mean)
+    Time per request:       177.249 [ms] (mean)
+    Time per request:       1.772 [ms] (mean, across all concurrent requests)
+    Transfer rate:          21302.13 [Kbytes/sec] received
+                         39832.41 kb/s sent
+                         61134.55 kb/s total
+
+    Connection Times (ms)
+               min  mean[+/-sd] median   max
+    Connect:        0    0   0.5      0       8
+    Processing:    23  176 101.6    148     806
+    Waiting:       23  141  77.7    118     732
+    Total:         23  177 101.7    148     806
+
+    Percentage of the requests served within a certain time (ms)
+    50%    148
+    66%    202
+    75%    236
+    80%    258
+    90%    318
+    95%    370
+    98%    443
+    99%    493
+    100%    806 (longest request)
+
+
+        sgi
+
+
+    Document Length:        38519 bytes
+    Concurrency Level:      100
+    Time taken for tests:   35.907 seconds
+    Complete requests:      16000
+    Failed requests:        0
+    Total transferred:      618464000 bytes
+    Total body sent:        1156752000
+    HTML transferred:       616304000 bytes
+    Requests per second:    445.59 [#/sec] (mean)
+    Time per request:       224.420 [ms] (mean)
+    Time per request:       2.244 [ms] (mean, across all concurrent requests)
+    Transfer rate:          16820.28 [Kbytes/sec] received
+                          31460.02 kb/s sent
+                          48280.30 kb/s total
+
+    Connection Times (ms)
+                min  mean[+/-sd] median   max
+    Connect:        0    2   1.5      1      53
+    Processing:    14  222 106.5    193    1021
+    Waiting:       11  201 106.0    174    1019
+    Total:         15  224 106.5    194    1023
+
+    Percentage of the requests served within a certain time (ms)
+    50%    194
+    66%    233
+    75%    268
+    80%    295
+    90%    364
+    95%    436
+    98%    525
+    99%    578
+    100%   1023 (longest request)
+
+
+
+$ ab -n 10000 -c 500 -T "application/x-www-form-urlencoded" -p "sgi_post.txt" http://localhost:8000/site.php
+
+
+        nginx
+
+
+   Document Length:        38519 bytes
+   Concurrency Level:      500
+   Time taken for tests:   23.065 seconds
+   Complete requests:      10000
+   Failed requests:        0
+   Total transferred:      386640000 bytes
+   Total body sent:        722970000
+   HTML transferred:       385190000 bytes
+   Requests per second:    433.55 [#/sec] (mean)
+   Time per request:       1153.265 [ms] (mean)
+   Time per request:       2.307 [ms] (mean, across all concurrent requests)
+   Transfer rate:          16369.96 [Kbytes/sec] received
+                           30609.84 kb/s sent
+                           46979.80 kb/s total
+
+   Connection Times (ms)
+                 min  mean[+/-sd] median   max
+   Connect:        0    2   1.7      1      72
+   Processing:    53 1121 769.0   1084    5242
+   Waiting:       14  439 415.3    246    3521
+   Total:         54 1122 768.9   1086    5245
+
+   Percentage of the requests served within a certain time (ms)
+     50%   1086
+     66%   1414
+     75%   1597
+     80%   1755
+     90%   2162
+     95%   2557
+     98%   2915
+     99%   3096
+    100%   5245 (longest request)
+
+
+        sgi
+
+
+    Document Length:        38519 bytes
+    Concurrency Level:      500
+    Time taken for tests:   27.197 seconds
+    Complete requests:      10000
+    Failed requests:        0
+    Total transferred:      386540000 bytes
+    Total body sent:        722970000
+    HTML transferred:       385190000 bytes
+    Requests per second:    367.69 [#/sec] (mean)
+    Time per request:       1359.836 [ms] (mean)
+    Time per request:       2.720 [ms] (mean, across all concurrent requests)
+    Transfer rate:          13879.63 [Kbytes/sec] received
+                            25959.95 kb/s sent
+                            39839.58 kb/s total
+
+    Connection Times (ms)
+                  min  mean[+/-sd] median   max
+    Connect:        0    2   1.6      1      28
+    Processing:    19 1325 521.6   1318    3526
+    Waiting:       17 1185 503.7   1198    3028
+    Total:         20 1327 521.5   1320    3528
+
+    Percentage of the requests served within a certain time (ms)
+      50%   1320
+      66%   1544
+      75%   1701
+      80%   1815
+      90%   2052
+      95%   2193
+      98%   2476
+      99%   2646
+     100%   3528 (longest request)
+
+
+$ ab -n 4000 -c 600 -T "application/x-www-form-urlencoded" -p "sgi_post.txt" http://192.168.220.129:8000/site.php
+
+
+        nginx
+
+
+    Document Length:        38519 bytes
+    Concurrency Level:      600
+    Time taken for tests:   7.500 seconds
+    Complete requests:      4000
+    Failed requests:        0
+    Total transferred:      154656000 bytes
+    Total body sent:        289188000
+    HTML transferred:       154076000 bytes
+    Requests per second:    533.35 [#/sec] (mean)
+    Time per request:       1124.962 [ms] (mean)
+    Time per request:       1.875 [ms] (mean, across all concurrent requests)
+    Transfer rate:          20138.17 [Kbytes/sec] received
+                            37655.94 kb/s sent
+                            57794.11 kb/s total
+
+    Connection Times (ms)
+                  min  mean[+/-sd] median   max
+    Connect:        0    2   1.5      1      17
+    Processing:    72 1032 571.4    908    3328
+    Waiting:       15  492 382.9    345    2524
+    Total:         73 1034 571.3    910    3331
+
+    Percentage of the requests served within a certain time (ms)
+      50%    910
+      66%   1221
+      75%   1402
+      80%   1496
+      90%   1830
+      95%   2042
+      98%   2503
+      99%   2838
+     100%   3331 (longest request)
+
+
+        sgi
+
+
+    Document Length:        38519 bytes
+    Concurrency Level:      600
+    Time taken for tests:   10.640 seconds
+    Complete requests:      4000
+    Failed requests:        0
+    Total transferred:      154616000 bytes
+    Total body sent:        289188000
+    HTML transferred:       154076000 bytes
+    Requests per second:    375.94 [#/sec] (mean)
+    Time per request:       1596.010 [ms] (mean)
+    Time per request:       2.660 [ms] (mean, across all concurrent requests)
+    Transfer rate:          14190.91 [Kbytes/sec] received
+                            26542.15 kb/s sent
+                            40733.06 kb/s total
+
+    Connection Times (ms)
+                  min  mean[+/-sd] median   max
+    Connect:        0    1   0.6      1       5
+    Processing:   281 1488 292.3   1616    1829
+    Waiting:      274 1485 292.2   1612    1828
+    Total:        282 1489 292.4   1617    1830
+
+    Percentage of the requests served within a certain time (ms)
+      50%   1617
+      66%   1630
+      75%   1638
+      80%   1643
+      90%   1655
+      95%   1664
+      98%   1671
+      99%   1676
+     100%   1830 (longest request)
+
+
+
+$ ab -n 1600 -c 1000 -T "application/x-www-form-urlencoded" -p "sgi_post.txt" http://192.168.220.129:8000/site.php
+
+
+        nginx
+
+
+    Document Length:        38519 bytes
+    Concurrency Level:      600
+    Time taken for tests:   15.518 seconds
+    Complete requests:      4000
+    Failed requests:        4
+       (Connect: 0, Receive: 0, Length: 4, Exceptions: 0)
+    Non-2xx responses:      4
+    Total transferred:      154502708 bytes
+    Total body sent:        289188000
+    HTML transferred:       153922648 bytes
+    Requests per second:    257.77 [#/sec] (mean)
+    Time per request:       2327.700 [ms] (mean)
+    Time per request:       3.880 [ms] (mean, across all concurrent requests)
+    Transfer rate:          9723.00 [Kbytes/sec] received
+                            18198.88 kb/s sent
+                            27921.88 kb/s total
+
+    Connection Times (ms)
+                  min  mean[+/-sd] median   max
+    Connect:        0    0   0.6      0       6
+    Processing:   196 1446 1892.6    837   15379
+    Waiting:      195 1373 1895.7    719   15378
+    Total:        196 1447 1892.6    837   15379
+
+    Percentage of the requests served within a certain time (ms)
+      50%    837
+      66%   1352
+      75%   1681
+      80%   1901
+      90%   3086
+      95%   3908
+      98%   7737
+      99%   8985
+     100%  15379 (longest request)
+
+
+        sgi
+
+
+    Document Length:        38519 bytes
+
+    Concurrency Level:      1000
+    Time taken for tests:   7.355 seconds
+    Complete requests:      1600
+    Failed requests:        0
+    Total transferred:      61846400 bytes
+    Total body sent:        115675200
+    HTML transferred:       61630400 bytes
+    Requests per second:    217.55 [#/sec] (mean)
+    Time per request:       4596.709 [ms] (mean)
+    Time per request:       4.597 [ms] (mean, across all concurrent requests)
+    Transfer rate:          8211.97 [Kbytes/sec] received
+                            15359.37 kb/s sent
+                            23571.34 kb/s total
+
+    Connection Times (ms)
+                  min  mean[+/-sd] median   max
+    Connect:        0    4 106.0      0    3000
+    Processing:   196 3507 2039.3   3463    6527
+    Waiting:      166 2683 1230.9   3287    3505
+    Total:        197 3512 2039.1   3463    6531
+
+    Percentage of the requests served within a certain time (ms)
+      50%   3463
+      66%   3506
+      75%   3515
+      80%   6514
+      90%   6524
+      95%   6525
+      98%   6526
+      99%   6526
+     100%   6531 (longest request)
+
+
+
+
+***
+-p sgi_post.txt - can remove
+
+nginx:
+worker_processes 20;
+worker_connections 1200;
+multi_accept on;
+
+sgi(cowboy):
+ranch:child_spec(http, 1200, ...).
+sgi:
+max_connections, 950

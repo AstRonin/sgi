@@ -13,3 +13,5 @@ sgi.iml
 _build
 rebar3
 rebar.lock
+*.pyc
+sys-local.config
