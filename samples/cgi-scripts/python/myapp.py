@@ -159,17 +159,17 @@ html = """<html>
             <!--script src='https://synrc.com/hi.js'></script-->
             <script>
             querystring = '/index-ws';
-            protos = [$client,$bert]; N2O_start();</script>
-            <script>
-                setTimeout(function(){ // because need time to start ws.
-                    http.send('/?page=form').done(function(data) {
-                        // much more better use some jQuery
-                        var n = document.createElement("div"); n.innerHTML = data;
-                        var arr = n.getElementsByTagName('script');
-                        for (var i = 0; i < arr.length; i++) eval(arr[i].innerHTML);
-                        document.getElementById('new-form').innerHTML = data;
-                    });
-                }, 2000);
+            protos = [$client,$bert];
+            $conn.onconnect = function() {
+                http.send('/?page=form').done(function(data) {
+                    // much more better use some jQuery
+                    var n = document.createElement("div"); n.innerHTML = data;
+                    var arr = n.getElementsByTagName('script');
+                    for (var i = 0; i < arr.length; i++) eval(arr[i].innerHTML);
+                    document.getElementById('new-form').innerHTML = data;
+                });
+            };
+            N2O_start();
             </script>
         </body>
     </html>

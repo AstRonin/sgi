@@ -5,15 +5,24 @@ Application written on Erlang. General design principles is fast, low memory and
 SGI give possibility simple and smart way to connect to any server by [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol)
 and have other protocols working under TCP.
 It supports the two protocols:
-- [FastCGI](https://en.wikipedia.org/wiki/FastCGI). This protocol is common for connect to [PHP (FPM)](http://php.net/manual/en/install.fpm.php).
-- [uwsgi](https://uwsgi-docs.readthedocs.io/en/latest/Protocol.html). This protocol is the native protocol used by the [uWSGI](https://uwsgi-docs.readthedocs.io) server.
+- [FastCGI](https://en.wikipedia.org/wiki/FastCGI). 
+    This protocol is common for connect to [PHP (FPM)](http://php.net/manual/en/install.fpm.php).
+- [uwsgi](https://uwsgi-docs.readthedocs.io/en/latest/Protocol.html). 
+    This protocol is the native protocol used by the [uWSGI](https://uwsgi-docs.readthedocs.io) server.
+    See Sample 3 for more details.
+
+## Base component
+
+- Server [Cowboy](https://ninenines.eu)
+- Framework [n2o](http://synrc.com/apps/n2o/)
 
 ## Requirements
    
-   Erlang 18.1+
+- Erlang 18.1+
 
-## Try Sample
-### Sample 1
+## Try Samples
+
+### Sample 1 - Add a content from other languages inside of your Site.
 
 This sample show you how you can add "Busines Logic" (big or old) to your site using PHP files.
 
@@ -30,9 +39,9 @@ Run php as fcgi server
 
 Now you can try it out: http://localhost:8000
 
-### Sample 2
+### Sample 2 - Your whole common site after erlang server and WebSocket instead of Ajax.
 
-This sample show you how you can run your site(wrote in PHP) with support WebSocket. Forget about Ajax and do your page much faster.
+This sample show you how you can run your site(written in other PL) with support WebSocket. Forget about Ajax and do your page much faster.
 
 You have follow advantages compared to Ajax even in common web page:
 - Fast
@@ -65,7 +74,7 @@ Run Server:
 
 Url:  http://localhost:8000/site.php
 
-### Sample 3
+### Sample 3 - Like Sample 2, but using Python.
 
 This sample show you how you can run your site (wrote in Python and support **uwsgi** protocol) with support WebSocket.
 For this you need use server [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/).
@@ -100,7 +109,7 @@ Run Server:
 
 Url:  http://localhost:8000/
 
-### Sample 4
+### Sample 4 - Part of socket connection
 
 This sample show you how you can use TCP Client of this app.
 Thanks to the smart balancer Client can connect to any number of servers in different methods: `priority` or `blurred`.

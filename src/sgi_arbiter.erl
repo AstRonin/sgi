@@ -53,15 +53,22 @@ start_link(A) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [A], []).
 
 alloc() ->
-    alloc(3000).
+    alloc(6000).
 alloc(0) ->
     {error, "Attempts have ended"};
 alloc(CountTry) ->
-    case gen_server:call(?SERVER, alloc, 300000) of % 10 minutes
-        {ok, undefined} ->
-            timer:sleep(10), % @todo add changing this number dynamically
-            alloc(CountTry - 1);
-        {ok, Pid} -> {ok, Pid}
+    try
+        case gen_server:call(?SERVER, alloc, 30000) of % 30 seconds
+            {ok, undefined} ->
+                timer:sleep(10), % @todo add changing this number dynamically
+                alloc(CountTry - 1);
+            {ok, Pid} -> {ok, Pid}
+        end
+    catch
+        _:R ->
+%%            wf:error(?MODULE, "Catched: ~p~n", [R]),
+            timer:sleep(100),
+            alloc(CountTry - 1)
     end.
 
 free(Pid) ->

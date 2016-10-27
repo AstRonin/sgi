@@ -1,6 +1,6 @@
 {application, sgi, [
     {description, "Socket Gateway Interface"},
-    {vsn, "0.5"},
+    {vsn, "0.6"},
     {registered, []},
     {applications, [
         kernel,

@@ -310,11 +310,8 @@ $ ab -n 1600 -c 1000 -T "application/x-www-form-urlencoded" -p "sgi_post.txt" ht
       99%   6526
      100%   6531 (longest request)
 
-
-
-
 ***
--p sgi_post.txt - can remove
+-p sgi_post.txt - some post data
 
 nginx:
 worker_processes 20;
@@ -325,3 +322,105 @@ sgi(cowboy):
 ranch:child_spec(http, 1200, ...).
 sgi:
 max_connections, 950
+
+
+
+
+
+$ ab -n 10000 -c 5000 -T "application/x-www-form-urlencoded" -p "sgi_post.txt" http://192.168.220.129:8001/site.php
+
+
+        nginx
+
+
+    Document Length:        181 bytes
+    Concurrency Level:      5000
+    Time taken for tests:   36.138 seconds
+    Complete requests:      10000
+    Failed requests:        9010                                                                                        ???
+    (Connect: 0, Receive: 0, Length: 9010, Exceptions: 0)
+    Non-2xx responses:      1100
+    Total transferred:      343722600 bytes
+    Total body sent:        722970000
+    HTML transferred:       342255000 bytes
+    Requests per second:    276.72 [#/sec] (mean)
+    Time per request:       18068.807 [ms] (mean)
+    Time per request:       3.614 [ms] (mean, across all concurrent requests)
+    Transfer rate:          9288.57 [Kbytes/sec] received
+                         19537.13 kb/s sent
+                         28825.70 kb/s total
+
+    Connection Times (ms)
+               min  mean[+/-sd] median   max
+    Connect:        0    2  67.3      0    3038
+    Processing:   262 9453 4924.1   9634   31180
+    Waiting:      251 7246 3985.9   7206   31179
+    Total:        262 9455 4924.0   9640   31180
+
+    Percentage of the requests served within a certain time (ms)
+      50%   9640
+      66%  12326
+      75%  12669
+      80%  15574
+      90%  15733
+      95%  16494
+      98%  17284
+      99%  17334
+     100%  31180 (longest request)
+
+
+        sgi
+
+
+    Document Length:        38433 bytes
+    Concurrency Level:      5000
+    Time taken for tests:   27.403 seconds
+    Complete requests:      10000
+    Failed requests:        0
+    Total transferred:      385680000 bytes
+    Total body sent:        722970000
+    HTML transferred:       384330000 bytes
+    Requests per second:    364.93 [#/sec] (mean)
+    Time per request:       13701.370 [ms] (mean)
+    Time per request:       2.740 [ms] (mean, across all concurrent requests)
+    Transfer rate:          13744.63 [Kbytes/sec] received
+                            25764.77 kb/s sent
+                            39509.41 kb/s total
+
+    Connection Times (ms)
+                  min  mean[+/-sd] median   max
+    Connect:        0    2  73.6      0    3028
+    Processing:  1365 10415 3797.3  11437   17778
+    Waiting:     1167 7941 3289.7   8102   17774
+    Total:       1365 10417 3796.5  11439   17778
+
+    Percentage of the requests served within a certain time (ms)
+      50%  11439
+      66%  12082
+      75%  12113
+      80%  14683
+      90%  15378
+      95%  15418
+      98%  16309
+      99%  16378
+     100%  17778 (longest request)
+
+***
+-p sgi_post.txt - some post data
+
+nginx:
+worker_processes 24;
+worker_connections 2000;
+multi_accept on;
+
+sgi(cowboy):
+ranch:child_spec(http, 2000, ...).
+sgi:
+max_connections, 500
+
+
+System configuration:
+Virtual machine
+Memory:    4 G
+Processor: Intel® Core™ i5-2400S CPU @ 2.50GHz × 2
+OS:        Ubuntu 15, 64-bit
