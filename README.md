@@ -1,10 +1,10 @@
 # SGI - Socket Gateway Interface
 
-Application written on Erlang. General design principles is fast, low memory and modularity.
+Application is written on Erlang. General design principles are: fast, low memory and modularity.
 
-SGI give possibility simple and smart way to connect to any server by [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol)
-and have other protocols working under TCP.
-It supports the two protocols:
+SGI gives possibility simple and smart way to connect to any server by [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol)
+and has other protocols working under TCP.
+It supports two protocols:
 - [FastCGI](https://en.wikipedia.org/wiki/FastCGI). 
     This protocol is common for connect to [PHP (FPM)](http://php.net/manual/en/install.fpm.php).
 - [uwsgi](https://uwsgi-docs.readthedocs.io/en/latest/Protocol.html). 
@@ -24,16 +24,16 @@ It supports the two protocols:
 
 ### Sample 1 - Add a content from other languages inside of your Site.
 
-This sample show you how you can add "Busines Logic" (big or old) to your site using PHP files.
+This sample shows you how you can add "Busines Logic" (big or old) to your site using PHP files.
 
-It based on the sample from [n2o](https://github.com/synrc/n2o).
+It is based on the sample from [n2o](https://github.com/synrc/n2o).
 
     $ git clone git://github.com/astronin/sgi
     $ cd sgi/samples
     $ ./mad deps compile plan
     $ ./mad repl
 
-Run php as fcgi server
+Run php as fcgi server:
 
     $ sudo service php5-fpm start
 
@@ -41,15 +41,15 @@ Now you can try it out: http://localhost:8000
 
 ### Sample 2 - Your whole common site after erlang server and WebSocket instead of Ajax.
 
-This sample show you how you can run your site(written in other PL) with support WebSocket. Forget about Ajax and do your page much faster.
+This sample shows you how you can run your site (written in other PL) with support of WebSocket. Forget about Ajax and do your page much more faster.
 
-You have follow advantages compared to Ajax even in common web page:
+You have the following advantages compared to Ajax even in common web page:
 - Fast
 - Low overhead, especially over https
 - Easy forwarding a file
 - Saving CPU resources of both a client and a server
 
-##### Settup:
+##### Setup:
 
     $ git clone git://github.com/astronin/sgi
     $ cd sgi/samples
@@ -76,10 +76,10 @@ Url:  http://localhost:8000/site.php
 
 ### Sample 3 - Like Sample 2, but using Python.
 
-This sample show you how you can run your site (wrote in Python and support **uwsgi** protocol) with support WebSocket.
-For this you need use server [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/).
+This sample shows you how you can run your site (wrote in Python and support **uwsgi** protocol) with support of WebSocket.
+For this you need to use server [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/).
 
-##### Settup:
+##### Setup:
 
     $ git clone git://github.com/astronin/sgi
     $ cd sgi/samples
@@ -111,10 +111,10 @@ Url:  http://localhost:8000/
 
 ### Sample 4 - Part of socket connection
 
-This sample show you how you can use TCP Client of this app.
+This sample shows you how you can use TCP Client of this app.
 Thanks to the smart balancer Client can connect to any number of servers in different methods: `priority` or `blurred`.
 
-##### Settup:
+##### Setup:
 
     $ git clone git://github.com/astronin/sgi
     $ cd sgi/samples
@@ -158,11 +158,11 @@ Change in `sys.config` next `{balancing_method, blurred},`
     $ ./mad repl
 
 Sample will create the two files: `server_distribution(priority).csv` and `server_distribution(blurred).csv`
-which show difference between of two methods of connection balancing to a server.
+which shows difference between two methods of connection balancing to a server.
 Open files in Excel(or other) and insert `XY(Scater)` graph:
 
 ![priority](priority1.png)
-Follow result with next weights: 
+Below are results with next weights: 
 
 Server port | Weight
 --- | ---
@@ -185,7 +185,7 @@ Server port | Weight
 
 #### Configuration
 
-Add follow section to sys.config
+Add the following section to sys.config
 ```erlang
 {sgi, [
     {servers, [
@@ -220,7 +220,7 @@ Add follow section to sys.config
     - `port` - the port number (9000 is default port)
     - `timeout` - connection timeout to server (60000 is default number)
     - `weight` - the weight of the server, using for balancing (default - 1)
-    - `start_connections` - the number of connections when server start at first time (default - 1)
+    - `start_connections` - the number of connections when server starts at first time (default - 1)
     - `max_connections` - number of max connections to a server, they will be added if will be necessary, created dynamically (default - 1)
     - `max_fails` - the number of unsuccessful attempts to connect to a server (default - 10)
     - `failed_timeout` - the number in seconds after which a connection will try reuse
@@ -230,13 +230,13 @@ Add follow section to sys.config
     
     Method  **priority** based on **weight** of server and send data, firstly, 
     on the connections of this server. The connections of first server 
-    in configuration will be in begin of queue, if a weight of servers will equal.
+    in configuration will be in the begining of queue, if a weight of servers is equal.
     Unlike the previous method **blurred** distribute the connections 
     alternately, first connection - from first server in configuration.
     Priority method use the connections of one server at first, then it 
-    use following servers. Last servers in a queue could be not used with 
+    uses following servers. Last servers in a queue could be not used with 
     low intensity of requests.
-    Blurred method uses all servers but without potential overload one of a server.
+    Blurred method uses all servers but without potential overload of one of servers.
 - `vhosts` - part of fastcgi
 
 ### Steps of request to FCGI
@@ -269,7 +269,7 @@ fcgi_end()
 
 ## 2. Advanced usage 
 
-Application consists two parts: **Protocol Part** and **Connection Part**.
+Application consists of two parts: **Protocol Part** and **Connection Part**.
 
 - Protocol Part - works under TCP connection. For now it included FastCGI implementation.
 - Connection Part - is responsible of forwarding a message to a server.
@@ -277,7 +277,7 @@ Application consists two parts: **Protocol Part** and **Connection Part**.
 ### Protocol Part:
 
 #### FastCGI
-The implementation of protocol include two modules: **N2O handler** and **protocol module**.
+The implementation of protocol includes two modules: **N2O handler** and **protocol module**.
 Other handlers can be written for other frameworks or servers.
 
 ##### Using N2O FastCGI Handler
@@ -329,19 +329,19 @@ sgi_fcgi_return_end % end of the requet, we can retun the answer to a browser
 ### Connection Part
 
 #### Arbiter
-Arbiter decide which stream is free (available), keeps busy socket(process),
+Arbiter decides which stream is free (available), keeps busy socket (process),
 and it does not allow the use of extra resources.
 
 #### Multiplexer
 
-Run multiplexer if your application support multiplexing. Even if you don't know,
-will be better run multiplexer also, it help your application don't be fail.
+Run multiplexer if your application supports multiplexing. Even if you don't know,
+will be better to run multiplexer also, it helps your application not to get failed.
 
 ```erlang
 {ok, _Pid} = sgi_sup:start_child(sgi_multiplexer, {?MODULE, request_pid})
 ```
 
-You should set callback function where multiplexer will getting your local PID 
+You should set callback function where multiplexer will get your local PID 
 from a storage(ETS) by request_id of your request: `{?MODULE, request_pid}`
 Set callback after start process `sgi_multiplexer:set_callback({M, F})` or 
 set callback to each request `{send, Request, PoolPid, M, F}`.
@@ -379,7 +379,7 @@ sgi_arbiter:free(PoolPid),
 
 ##### Or easy way if you want Just Send data and just receive message
 
-For example you want send quick(test) message and you do not want write many codes
+For example you want send quick (test) message and you do not want write many codes
 
 ```erlang
 {ok, Bin} = sgi_pool:once_call(Request),
