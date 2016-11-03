@@ -11,7 +11,7 @@ It supports two protocols:
     This protocol is the native protocol used by the [uWSGI](https://uwsgi-docs.readthedocs.io) server.
     See Sample 3 for more details.
 
-## Base component
+## Base components
 
 - Server [Cowboy](https://ninenines.eu)
 - Framework [n2o](http://synrc.com/apps/n2o/)

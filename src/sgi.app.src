@@ -1,11 +1,12 @@
 {application, sgi, [
     {description, "Socket Gateway Interface"},
     {vsn, "0.6"},
-    {registered, []},
-    {applications, [
-        kernel,
-        stdlib
-    ]},
+    {registered, [sgi_arbiter, sgi_multiplexer, sgi_sup]},
+    {modules, []},
+    {applications, [kernel, stdlib, n2o]},
     {mod, {sgi_app, []}},
-    {env, []}
+    {env, []},
+    {maintainers, ["Roman Shuplov"]},
+    {licenses, ["MIT"]},
+    {links, [{"Github", "https://github.com/AstRonin/sgi"}]}
 ]}.
