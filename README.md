@@ -9,7 +9,11 @@ It supports two protocols:
     This protocol is common for connect to [PHP (FPM)](http://php.net/manual/en/install.fpm.php).
 - [uwsgi](https://uwsgi-docs.readthedocs.io/en/latest/Protocol.html). 
     This protocol is the native protocol used by the [uWSGI](https://uwsgi-docs.readthedocs.io) server.
-    See Sample 3 for more details.
+    See 3-th sample for more details.
+
+Application be able to create connect through the proxy, now support SOCKS5 protocol, 
+and you can send message, for example through the [Tor](https://torproject.org/). 
+@see Configuration section.
 
 ## Base components
 
@@ -181,9 +185,7 @@ Server port | Weight
 
 ## 1. Basic usage
 
-### Use FastCGI protocol with N2O.
-
-#### Configuration
+### Configuration
 
 Add the following section to sys.config
 ```erlang
@@ -194,8 +196,9 @@ Add the following section to sys.config
     ]},
         % max_connections - run N processes with 1 connection on each process. Count cannot be bigger then children of fcgi processes
     {balancing_method, priority}, % priority | blurred, priority is default
-    {fcgi_timeout, 600000}, % 10 minutes
-    {multiplexed, unknown}, % can be "1" | "0" | unknown
+    %% {proxy, #{type => socks5, address => localhost, port => 9050, timeout => 60000, username => "username", password => <<"password">>}},
+    {response_timeout, 600000}, % 10 minutes
+    {multiplexed, unknown}, % can be 1 | 0 | unknown
     {vhosts, [
         [
             {server_name, "phphost.com"}, % set your server name(domain), for local tests add line "127.0.0.1 phphost.com" into "/etc/hosts" (in Linux), "C:\Windows\System32\drivers\etc\hosts"(in Windows)
@@ -236,10 +239,19 @@ Add the following section to sys.config
     Priority method use the connections of one server at first, then it 
     uses following servers. Last servers in a queue could be not used with 
     low intensity of requests.
-    Blurred method uses all servers but without potential overload of one of servers.
+    Blurred method uses all servers but without potential overload of one of the servers
+- `response_timeout` - the handler will wait response from a server
+- `multiplexed` - set to 1 (integer) if your server support multiplex connection
+- `proxy` - Proxy settings
+    - `type` - the protocol of the proxy server (supports **socks5**)
+    - `address` - the address of proxy server
+    - `port` - the port of proxy server
+    - `timeout` - connection timeout (default - 60000)
+    - `username` - set the param if need auth (binary)
+    - `password` - set the param if need auth (binary)
 - `vhosts` - part of fastcgi
 
-### Steps of request to FCGI
+### Steps of request to FastCGI
 
 Add deps to rebar.config:
 ```erlang
@@ -261,11 +273,25 @@ Using js code for returning data to the browser:
 ```erlang
 wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++", "++wf:to_list(jsone:encode(Headers))++")");
 ```
-Terminate fcgi protocol and clear memory:
-```erlang
-fcgi_end()
-```
 
+### Steps of request to uwsgi
+
+Add deps to rebar.config:
+```erlang
+{sgi, ".*", {git, "git://github.com/astronin/sgi", {tag, "master"}}}
+```
+Add new **event** in your file (index.erl):
+```erlang
+event(#http{url = _Url, method = _Method, body = _Body} = Http)
+```
+Send data to the uWSGI Server:
+```erlang
+{Ret, Status, Headers} = sgi_n2o_uwsgi_handler:send(Http),
+```
+Using js code for returning data to the browser:
+```erlang
+wf:wire("http.back('"++wf:to_list(js_escape(Ret))++"', "++wf:to_list(Status)++", "++wf:to_list(jsone:encode(Headers))++")");
+```
 
 ## 2. Advanced usage 
 
@@ -293,7 +319,7 @@ Start new fcgi process and start connection with fcgi server
 ```
 Send message
 ```erlang
-Pid ! {overall, self(), FCGIParams, has_body(Http), Body},
+Pid ! {overall, self(), CGIParams, has_body(Http), Body},
 ```
 Or if you need more flexibility you can use next 3 commands:
 Send Params to server, this is pair of `{Key,Value}`
@@ -324,6 +350,40 @@ sgi_fcgi_return_end % end of the requet, we can retun the answer to a browser
 ```
 ```erlang
 {sgi_fcgi_timeout, Pid} % self timeout
+```
+
+#### uwsgi
+The implementation of protocol includes two modules: **N2O handler** and **protocol module**.
+Other handlers can be written for other frameworks or servers.
+
+##### Using N2O uwsgi Handler
+
+@See **Basic usage...**
+
+##### Using uwsgi Protocol
+Module runnable as a process.
+
+Start new uwsgi process
+```erlang
+{ok, Pid} = sgi_uwsgi:start(),
+```
+Send message
+```erlang
+Pid ! {overall, self(), CGIParams, has_body(Http), Body},
+```
+Stop uwsgi process with the release of resources
+```erlang
+sgi_uwsgi:stop(Pid),
+```
+Receive message with next tags
+```erlang
+{sgi_uwsgi_return, Out} % common respones
+```
+```erlang
+{sgi_uwsgi_return_error, Err} % some error
+```
+```erlang
+{sgi_uwsgi_timeout, Pid} % self timeout
 ```
 
 ### Connection Part

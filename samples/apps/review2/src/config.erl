@@ -13,6 +13,7 @@ log_modules() -> % any
     sgi_fcgi,
     sgi_sup,
     sgi_arbiter,
+    sgi_socks5,
 
 %%    n2o_async,
 %%    n2o_proto,

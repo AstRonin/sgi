@@ -123,6 +123,8 @@ request_pid(Data) ->
             Req#sgi_fcgi_requests.pid;
         {more, More} -> % undefined
             wf:error(?MODULE, "!!!!!!!!!!!!!!!!!!!!!!request_pid, exception, MORE!!!!!!!!!!!!!!!!!!!!!!!!!!!: ~p~n", [More]),
+            undefined;
+        {error, invalid} ->
             undefined
     end.
 
@@ -168,8 +170,8 @@ handle_call({?FCGI_BEGIN_REQUEST, Role, KeepConn}, {From, _Tag}, State) ->
             save_req(R),
             Data = encode(?FCGI_BEGIN_REQUEST, R, <<Role:16, KeepConn, 0:40>>),
             case is_mult() of
-                ?FCGI_MULTIPLEXED_NO -> PoolPid ! {send, Data, self()};
-                _ -> ?MULTIPLEXER ! {send, Data, PoolPid}
+                ?FCGI_MULTIPLEXED_YES -> ?MULTIPLEXER ! {send, Data, PoolPid};
+                _ -> PoolPid ! {send, Data, self()}
             end,
             case is_mult() of ?FCGI_MULTIPLEXED_YES -> ?ARBITER:free(PoolPid); _ -> ok end,
             State1 = State#state{parent = From, req_id = R, pool_pid = PoolPid},
@@ -188,27 +190,27 @@ handle_cast(_Request, State) ->
 handle_info({?FCGI_PARAMS, Params}, State) ->
     P = <<(encode(?FCGI_PARAMS, State#state.req_id, encode_pairs(Params)))/binary, (encode(?FCGI_PARAMS, State#state.req_id, <<>>))/binary>>,
     case is_mult() of
-        ?FCGI_MULTIPLEXED_NO -> State#state.pool_pid ! {send, P, self()};
-        _ -> ?MULTIPLEXER ! {send, P, State#state.pool_pid}
+        ?FCGI_MULTIPLEXED_YES -> ?MULTIPLEXER ! {send, P, State#state.pool_pid};
+        _ -> State#state.pool_pid ! {send, P, self()}
     end,
     {noreply, State};
 % Send body
 handle_info({?FCGI_STDIN, Request}, State) ->
     case is_mult() of
-        ?FCGI_MULTIPLEXED_NO -> State#state.pool_pid ! {send, encode(?FCGI_STDIN, State#state.req_id, Request), self()};
-        _ -> ?MULTIPLEXER ! {send, encode(?FCGI_STDIN, State#state.req_id, Request), State#state.pool_pid}
+        ?FCGI_MULTIPLEXED_YES -> ?MULTIPLEXER ! {send, encode(?FCGI_STDIN, State#state.req_id, Request), State#state.pool_pid};
+        _ -> State#state.pool_pid ! {send, encode(?FCGI_STDIN, State#state.req_id, Request), self()}
     end,
     {noreply, State};
 handle_info(<<>>, State) -> %% send empty string as end of request
     case is_mult() of
-        ?FCGI_MULTIPLEXED_NO -> State#state.pool_pid ! {send, encode(?FCGI_STDIN, State#state.req_id, <<>>), self()};
-        _ -> ?MULTIPLEXER ! {send, encode(?FCGI_STDIN, State#state.req_id, <<>>), State#state.pool_pid}
+        ?FCGI_MULTIPLEXED_YES -> ?MULTIPLEXER ! {send, encode(?FCGI_STDIN, State#state.req_id, <<>>), State#state.pool_pid};
+        _ -> State#state.pool_pid ! {send, encode(?FCGI_STDIN, State#state.req_id, <<>>), self()}
     end,
     {noreply, State};
 handle_info(?FCGI_ABORT_REQUEST, State) ->
     case is_mult() of
-        ?FCGI_MULTIPLEXED_NO -> State#state.pool_pid ! {send, encode(?FCGI_ABORT_REQUEST, State#state.req_id, <<>>), self()};
-        _ -> ?MULTIPLEXER ! {send, encode(?FCGI_ABORT_REQUEST, State#state.req_id, <<>>), State#state.pool_pid}
+        ?FCGI_MULTIPLEXED_YES -> ?MULTIPLEXER ! {send, encode(?FCGI_ABORT_REQUEST, State#state.req_id, <<>>), State#state.pool_pid};
+        _ -> State#state.pool_pid ! {send, encode(?FCGI_ABORT_REQUEST, State#state.req_id, <<>>), self()}
     end,
     {noreply, State};
 %% This event send a message by one request, what is much faster than separately
@@ -222,13 +224,13 @@ handle_info({overall, From, Params, HasBody, Body}, State) ->
             case HasBody of
                 true ->
                     case is_mult() of
-                        ?FCGI_MULTIPLEXED_NO -> PoolPid !    {send, <<Data1/binary, (encode(?FCGI_STDIN, R, Body))/binary, (encode(?FCGI_STDIN, R, <<>>))/binary>>, self()};
-                        _ -> ?MULTIPLEXER ! {send, <<Data1/binary, (encode(?FCGI_STDIN, R, Body))/binary, (encode(?FCGI_STDIN, R, <<>>))/binary>>, PoolPid}
+                        ?FCGI_MULTIPLEXED_YES -> ?MULTIPLEXER ! {send, <<Data1/binary, (encode(?FCGI_STDIN, R, Body))/binary, (encode(?FCGI_STDIN, R, <<>>))/binary>>, PoolPid};
+                        _ -> PoolPid ! {send, <<Data1/binary, (encode(?FCGI_STDIN, R, Body))/binary, (encode(?FCGI_STDIN, R, <<>>))/binary>>, self()}
                     end;
                 _ ->
                     case is_mult() of
-                        ?FCGI_MULTIPLEXED_NO -> PoolPid !    {send, <<Data1/binary, (encode(?FCGI_STDIN, R, <<>>))/binary>>, self()};
-                        _ -> ?MULTIPLEXER ! {send, <<Data1/binary, (encode(?FCGI_STDIN, R, <<>>))/binary>>, PoolPid}
+                        ?FCGI_MULTIPLEXED_YES -> ?MULTIPLEXER ! {send, <<Data1/binary, (encode(?FCGI_STDIN, R, <<>>))/binary>>, PoolPid};
+                        _ -> PoolPid ! {send, <<Data1/binary, (encode(?FCGI_STDIN, R, <<>>))/binary>>, self()}
                     end
             end,
             {noreply, State#state{parent = From, req_id = R, pool_pid = PoolPid}};
@@ -272,7 +274,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 check_multiplex() ->
     case is_mult() of
-        ?FCGI_MULTIPLEXED_NO ->
+        ?FCGI_MULTIPLEXED_UNKNOWN ->
             {ok, Pid} = ?SERVER:start(),
             {ok, Ret} = gen_server:call(Pid, ?FCGI_GET_VALUES),
             ?SERVER:stop(Pid),
@@ -287,7 +289,7 @@ check_multiplex() ->
 
 start_multiplexer() -> % we don't need multiplexer if we don't use multiplex connection
     case is_mult() of
-        V when V == ?FCGI_MULTIPLEXED_YES; V == ?FCGI_MULTIPLEXED_UNKNOWN ->
+        V when V == ?FCGI_MULTIPLEXED_YES ->
             {ok, _} = sgi_sup:start_child(?MULTIPLEXER, {?MODULE, request_pid}), ok;
         _ ->
             ok
@@ -388,4 +390,4 @@ stream_body(Bin) ->
     Bin.
 
 is_mult() ->
-    wf:config(sgi, multiplexed, ?FCGI_MULTIPLEXED_NO).
+    wf:config(sgi, multiplexed, ?FCGI_MULTIPLEXED_UNKNOWN).

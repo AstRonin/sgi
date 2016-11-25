@@ -5,11 +5,29 @@
     Key :: term(),
     List :: [term()].
 pv(K, L) -> pv(K, L, undefined).
+
 -spec pv(Key, List, Default) -> term() when
     Key :: term(),
     List :: [term()],
     Default :: term().
 pv(K, L, D) -> proplists:get_value(K, L, D).
+
+-spec mv(Key, Map) -> term() when
+    Key :: term(),
+    Map :: map().
+mv(Key, Map) -> mv(Key, Map, undefined).
+
+-spec mv(Key, Map, Default) -> term() when
+    Key :: term(),
+    Map :: map(),
+    Default :: term().
+mv(Key, Map, Default) ->
+    try
+        maps:get(Key, Map, Default)
+    catch
+        _:_ ->
+            Default
+    end.
 
 -spec ct(TimerRef) -> Result | ok when
     TimerRef :: reference(),

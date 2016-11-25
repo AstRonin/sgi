@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, start_link/1, start_link/2, once_call/1, settings/1, try_connect/1]).
+-export([start_link/0, start_link/1, start_link/2, once_call/1, once_call/2, settings/1, try_connect/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -54,7 +54,7 @@ once_call(Request) ->
     case ?ARBITER:alloc() of
         {ok, PoolPid} ->
             Ret = try
-                gen_server:call(PoolPid, {once, Request})
+                gen_server:call(PoolPid, {once, Request}, 600000)
             catch
                 _:Reason ->
                     {error, Reason}
@@ -62,6 +62,16 @@ once_call(Request) ->
             ?ARBITER:free(PoolPid),
             Ret;
         {error, Reason} ->
+            {error, Reason}
+    end.
+
+-spec once_call(pid(), binary()) -> {ok, binary()} | {error, term()}.
+once_call(PoolPid, Request) ->
+    try
+        gen_server:call(PoolPid, {once, Request}, 600000)
+    catch
+        _:Reason ->
+            wf:error(?MODULE, "Gen Server Call failed: ~p~n", [Reason]),
             {error, Reason}
     end.
 
@@ -215,22 +225,48 @@ connect(State) -> connect(State, once).
 
 %%
 %% Process is trying to connect to a server.
-%% Process will close previous connection if need connect by passive mode.
 %%
--spec connect(#state{}, tcp_active_type()) -> {ok, State :: #state{}} | {error, Reason :: term(), State :: #state{}}.
+-spec connect(#state{}, tcp_active_type()) ->
+    {ok, State :: #state{}} | {error, Reason :: term(), State :: #state{}}.
+
 connect(State = #state{socket = undefined, address = Address, port = Port}, Active) ->
-    case gen_tcp:connect(Address, Port, [binary, {active, Active}], State#state.timeout) of
+
+    {Address1, Port1} =
+    case wf:config(sgi, proxy) of
+        #{address := A, port := P} -> {A, P};
+        _ -> {Address, Port}
+    end,
+
+    case gen_tcp:connect(Address1, Port1, [binary], State#state.timeout) of
         {ok, Socket} ->
-            State1 = State#state{socket = Socket, fails = 0},
-            {ok, State1};
+            ProxyResult =
+            case wf:config(sgi, proxy) of
+                #{type := socks5} ->
+                    sgi_socks5:connect(Socket, Address, Port);
+                %% @todo Add other proxy
+                _ ->
+                    ok
+            end,
+            case ProxyResult of
+                ok ->
+                    State1 = success_connect(Socket, State, Active),
+                    {ok, State1};
+                Error ->
+                    wf:error(?MODULE, "Proxy connect error: ~p~n", [Error]),
+                    gen_tcp:close(Socket),
+                    State1 = fail_connect(State),
+                    {error, Error, State1}
+            end;
         {error, Reason} ->
-            State1 = State#state{fails = State#state.fails + 1},
-            State2 = overage_fail_conns(State1),
+            State2 = fail_connect(State),
             {error, Reason, State2}
     end;
-connect(State, false) ->
-    State1 = close(State),
-    connect(State1, false);
+connect(#state{socket = Socket} = State, false) ->
+%%connect(State, false) ->
+    inet:setopts(Socket, [{active, false}]),
+%%    State1 = close(State),
+%%    connect(State1, false);
+    {ok, State};
 connect(State = #state{socket = Socket}, Active) ->
     case erlang:port_info(Socket, id) of
         undefined ->
@@ -239,6 +275,14 @@ connect(State = #state{socket = Socket}, Active) ->
         _ ->
             {ok, State}
     end.
+
+success_connect(Socket, State, Active) ->
+    inet:setopts(Socket, [{active, Active}]),
+    State#state{socket = Socket, fails = 0}.
+
+fail_connect(State) ->
+    State1 = State#state{fails = State#state.fails + 1},
+    overage_fail_conns(State1).
 
 -spec close(#state{}) -> #state{}.
 close(State) when State#state.socket /= undefined ->

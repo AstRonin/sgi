@@ -331,7 +331,7 @@ ret() ->
         true -> [];
         _ ->
             receive
-                {sgi_uwsgi_return, Out, _Err} ->
+                {sgi_uwsgi_return, Out} ->
                     stdout(Out);
                 {sgi_uwsgi_return_error, Err} ->
                     wf:error(?MODULE, "Connection error ~p~n", [Err]),

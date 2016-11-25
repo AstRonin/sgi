@@ -150,7 +150,7 @@ encode_pair({N, V}) ->
 send_back(<<>>, State) ->
     State;
 send_back(Data, State) ->
-    State#state.parent ! {sgi_uwsgi_return, Data, <<>>},
+    State#state.parent ! {sgi_uwsgi_return, Data},
     State.
 
 decode_pairs(B) -> decode_pairs(B, []).
