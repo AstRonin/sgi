@@ -3,7 +3,7 @@
     {vsn, "0.7.0"},
     {registered, [sgi_arbiter, sgi_multiplexer, sgi_sup]},
     {modules, []},
-    {applications, [kernel, stdlib, n2o]},
+    {applications, [kernel, stdlib, sasl, os_mon, n2o]},
     {mod, {sgi_app, []}},
     {env, []},
     {maintainers, ["Roman Shuplov"]},
