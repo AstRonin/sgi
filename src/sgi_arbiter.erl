@@ -16,6 +16,9 @@
     map/0,
     servers/0,
     not_av/0,
+    total_conn_count/0,
+    allocated_conn_count/0,
+    state/0,
     down/2]).
 
 %% gen_server callbacks
@@ -34,14 +37,19 @@
 -define(NOTAVAILABLE, 2).
 -define(DOWN, 3).
 
+-define(MAX_CONNECTIONS, 1).
+
 -define(PROC_LIST, proc_list).
 -define(PROC_MAP, proc_map).
 -define(PROC_BY_SERVER, proc_by_server).
 
 -define(PROC_ORDER_NUM, proc_order_num).
 
--record(state, {adding_new_pool = 0, ch_to_state_timer}).
+-record(state, {adding_new_pool = 0, ch_to_state_timer, total_conn_count = 0, allocated_conn_count = 0}).
 -record(proc, {pid, weight = 1, server_name, status = ?AVAILABLE, time_created = 0, failed_out = 0}).
+
+-type proc() :: #proc{}.
+
 
 %%%===================================================================
 %%% API
@@ -71,27 +79,25 @@ alloc(CountTry) ->
             alloc(CountTry - 1)
     end.
 
-free(Pid) ->
-    gen_server:cast(?SERVER, {free, Pid}).
+free(Pid) -> gen_server:cast(?SERVER, {free, Pid}).
+new_pool_started(Pid) -> gen_server:cast(?SERVER, {new_pool_started, Pid}).
+free_all() -> gen_server:cast(?SERVER, free_all).
 
-new_pool_started(Pid) ->
-    gen_server:cast(?SERVER, {new_pool_started, Pid}).
+-spec list() -> [pid()].
+list() -> gen_server:call(?SERVER, list).
 
-free_all() ->
-    gen_server:cast(?SERVER, free_all).
+-spec map() -> #{pid() => proc()}.
+map() -> gen_server:call(?SERVER, map).
 
-list() ->
-    gen_server:call(?SERVER, list).
-map() ->
-    gen_server:call(?SERVER, map).
-servers() ->
-    gen_server:call(?SERVER, servers).
-not_av() ->
-    gen_server:call(?SERVER, not_av).
+-spec servers() -> #{ServerName => #{'processes' => list(), 'settings' => map()}} when
+    ServerName :: atom().
+servers() -> gen_server:call(?SERVER, servers).
 
-down(Pid, FailedTimeout) ->
-    gen_server:cast(?SERVER, {down, Pid, FailedTimeout}).
-
+not_av() -> gen_server:call(?SERVER, not_av).
+total_conn_count() -> gen_server:call(?SERVER, total_conn_count).
+allocated_conn_count() -> gen_server:call(?SERVER, allocated_conn_count).
+down(Pid, FailedTimeout) -> gen_server:cast(?SERVER, {down, Pid, FailedTimeout}).
+state() -> gen_server:call(?SERVER, state).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -99,8 +105,13 @@ down(Pid, FailedTimeout) ->
 
 init([]) ->
     self() ! ch_to_state,
+    timer:send_interval(60000, update_counts),
     {ok, #state{adding_new_pool = 1}}.
 
+
+%%-------------------------------------------------------------------
+%% Handle Call
+%%-------------------------------------------------------------------
 
 handle_call(alloc, _From, State) ->
     V = case active() of
@@ -118,9 +129,18 @@ handle_call(servers, _From, State) ->
     {reply, get_servers(), State};
 handle_call(not_av, _From, State) ->
     {reply, get_not_av(), State};
+handle_call(total_conn_count, _From, State) ->
+    {reply, State#state.total_conn_count, State};
+handle_call(allocated_conn_count, _From, State) ->
+    {reply, State#state.allocated_conn_count, State};
+handle_call(state, _From, State) ->
+    {reply, State, State};
 handle_call(_Request, _From, State) ->
-{reply, ok, State}.
+    {reply, ok, State}.
 
+%%-------------------------------------------------------------------
+%% Handle Cast
+%%-------------------------------------------------------------------
 
 handle_cast({down, Pid, FailedTimeout}, State) ->
     down1(Pid, FailedTimeout),
@@ -137,8 +157,16 @@ handle_cast(free_all, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(add_pool, #state{adding_new_pool = 1} = State) ->
-    {noreply, State};
+%%-------------------------------------------------------------------
+%% Handle Info
+%%-------------------------------------------------------------------
+
+handle_info(update_counts, State) ->
+    State1 = update_counts(State),
+    {noreply, State1};
+handle_info(add_pool, State) ->
+    State1 = State#state{adding_new_pool = 1},
+    {noreply, State1};
 handle_info(add_pool, State) ->
     State1 = case add_pool() of
         N when is_integer(N) andalso N > 0 ->
@@ -152,15 +180,18 @@ handle_info(ch_to_state, State) ->
     sgi:ct(State#state.ch_to_state_timer),
     Ch = supervisor:which_children(?SUPERVISOR),
     ch_to_state(Ch),
+
+    self() ! update_counts,
+
     {noreply, State#state{adding_new_pool = 0, ch_to_state_timer = undefined}};
 handle_info(Info, State) ->
     wf:error(?MODULE, "Unknown Request: ~p~n", [Info]),
     {noreply, State}.
 
+%%-------------------------------------------------------------------
 
 terminate(_Reason, _State) ->
     ok.
-
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -174,7 +205,7 @@ add_pool() ->
     add_pool(maps:values(S), 0).
 add_pool([H|T], AddedNum) ->
     Sett = maps:get(settings, H, #{}),
-    MaxConnCount = maps:get(max_connections, Sett, 1),
+    MaxConnCount = maps:get(max_connections, Sett, ?MAX_CONNECTIONS),
     ProcCount = length(maps:get(processes, H, [])),
     AddedNum1 = AddedNum + case ProcCount < MaxConnCount of
         true ->
@@ -191,11 +222,16 @@ increase_pool_count(Num, Max) -> % Num * 2 * ratio, ratio - 0.8 and can be chang
     Num1 = round(Num * 2 * 0.8),
     case Num1 > Max of true -> Max - Num; _ -> Num1 - Num end.
 
+
+%%-------------------------------------------------------------------
+%% Add children to State of Arbiter
+%%-------------------------------------------------------------------
+
 ch_to_state(Ch) ->
     ch_to_state(lists:reverse(Ch), []).
 ch_to_state([Ch|Children], NewList) ->
     case hd(element(4, Ch)) of
-        sgi_pool -> % @todo fon't forget about this module name if will be changes of name of module.
+        sgi_pool -> % @todo don't forget about this module name if will be changes of name of module.
             ch_to_state(Children, [make_pool(element(2, Ch))|NewList]);
         _ ->
             ch_to_state(Children, NewList)
@@ -222,7 +258,7 @@ proc_sort(Processes) ->
             SortedList = lists:sort(Fun, Processes),
             lists:map(fun(P) -> P#proc.pid end, SortedList)
     end,
-    Temp = lists:map(fun(P) -> {P#proc.pid,P} end, Processes),
+    Temp = lists:map(fun(P) -> {P#proc.pid, P} end, Processes),
     Map = maps:from_list(Temp),
     OldMap = case wf:state(?PROC_MAP) of undefined -> #{}; M1 -> M1 end,
     wf:state(?PROC_MAP, maps:merge(Map, OldMap)),
@@ -232,14 +268,17 @@ proc_sort(Processes) ->
 group_by_server(Ch) ->
     S = wf:config(sgi, servers),
     group_by_server(S, Ch, 1, #{}).
-group_by_server([H|T], Ch, N, M) ->
-    Settings = maps:from_list(H),
+group_by_server([Settings|T], Ch, N, M) ->
     ServerName = maps:get(name, Settings),
     M1 = M#{ServerName => #{settings => Settings, processes => ch_by_server(Ch, ServerName)}},
     group_by_server(T, Ch, N + 1, M1);
 group_by_server([], _, _, M) ->
     M.
 
+-spec ch_by_server(ProcList, ServerName) -> Pids when
+    ProcList :: [proc()],
+    ServerName :: string(),
+    Pids :: [pid()].
 ch_by_server(L, Name) ->
     ch_by_server(L, Name, []).
 ch_by_server([H|T], Name, Acc) ->
@@ -309,6 +348,19 @@ active([H|T], M) ->
     end;
 active([], _) -> undefined.
 
+update_counts(State) ->
+    Map = wf:state(?PROC_BY_SERVER),
+    Fun = fun(_K, V, AccIn) ->
+        case V of
+            #{settings := #{max_connections := V1}} -> AccIn + V1;
+            _ -> ?MAX_CONNECTIONS
+        end
+    end,
+    Total = maps:fold(Fun, 0, Map),
+    Allocated = erlang:length(wf:state(?PROC_LIST)),
+    State#state{total_conn_count = Total, allocated_conn_count = Allocated}.
+
+
 availabled(P,T,M) ->
     case check_alive(P) andalso check_connect(P) of true->P;_->active(T,M) end.
 downed(P,T,M) ->
@@ -342,8 +394,6 @@ down1(Pid, FailedTimeout) ->
         {ok, P} -> wf:state(?PROC_MAP, Map#{Pid:=P#proc{status=?DOWN,failed_out=(sgi:time_now()+FailedTimeout)}});
         _ -> ok
     end.
-
-
 
 new_pool_started(Pid, _State) -> % when sgi:is_alive(Pid) ->
     Pool = make_pool(Pid),

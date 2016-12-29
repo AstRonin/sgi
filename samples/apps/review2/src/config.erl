@@ -14,6 +14,8 @@ log_modules() -> % any
     sgi_sup,
     sgi_arbiter,
     sgi_socks5,
+    sgi_monitoring,
+    sgi_cluster,
 
 %%    n2o_async,
 %%    n2o_proto,

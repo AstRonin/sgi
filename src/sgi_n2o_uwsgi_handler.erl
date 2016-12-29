@@ -335,13 +335,15 @@ ret() ->
                     stdout(Out);
                 {sgi_uwsgi_return_error, Err} ->
                     wf:error(?MODULE, "Connection error ~p~n", [Err]),
-                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
+                    update_response_headers([{<<"retry-after">>, <<"3600">>}], true),
+%%                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
                     wf:state(status, 503),
                     [];
                 {sgi_uwsgi_timeout, Pid} ->
                     sgi_uwsgi:stop(Pid),
-                    wf:error(?MODULE, "Connect timeout to FastCGI ~n", []),
-                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
+                    wf:error(?MODULE, "Connect timeout to uwsgi ~n", []),
+                    update_response_headers([{<<"retry-after">>, <<"3600">>}], true),
+%%                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
                     wf:state(status, 503),
                     []
             end

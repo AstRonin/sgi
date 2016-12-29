@@ -101,13 +101,13 @@ try_connect(Pid) ->
 init([_Name, Conf]) ->
     timer:send_interval(?HIBERNATE_AFTER, self(), hibernate),
     {ok, #state{
-        server_name    = sgi:pv(name, Conf, default),
-        address        = sgi:pv(address, Conf, localhost),
-        port           = sgi:pv(port, Conf, 9000),
-        weight         = sgi:pv(weight, Conf, 1),
-        max_fails      = sgi:pv(max_fails, Conf, 10),
-        failed_timeout = sgi:pv(failed_timeout, Conf, 1), % in seconds
-        timeout        = sgi:pv(timeout, Conf, 30000)
+        server_name    = sgi:mv(name, Conf, default),
+        address        = sgi:mv(address, Conf, localhost),
+        port           = sgi:mv(port, Conf, 9000),
+        weight         = sgi:mv(weight, Conf, 1),
+        max_fails      = sgi:mv(max_fails, Conf, 10),
+        failed_timeout = sgi:mv(failed_timeout, Conf, 1), % in seconds
+        timeout        = sgi:mv(timeout, Conf, 30000)
     }}.
 
 handle_call({once, Request}, _From, State) ->

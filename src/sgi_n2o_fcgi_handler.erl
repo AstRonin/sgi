@@ -3,7 +3,7 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 
 %% API
--export([init/0, send/0, send/1, stop/0]).
+-export([init/0, send/0, send/1, do_send/3, stop/0]).
 
 -define(PROTO_CGI, <<"CGI/1.1">>).
 -define(PROTO_HTTP, <<"HTTP/1.1">>).
@@ -40,18 +40,35 @@ send(Http) ->
     {_, Body} = bs(Http),
     CGIParams = get_params(Http),
 
-    {ok, Pid} = sgi_fcgi:start(),
-    Pid ! {overall, self(), CGIParams, has_body(Http), Body},
-    Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
-    Ret = ret(),
-    sgi:ct(Timer),
-    sgi_fcgi:stop(Pid),
+    Ret = case sgi_cluster:is_use() of
+        true ->
+            sgi_cluster:send(sgi_n2o_fcgi_handler, do_send, [CGIParams, has_body(Http), Body]);
+        _ ->
+            do_send(CGIParams, has_body(Http), Body)
+    end,
+
+%%    {ok, Pid} = sgi_fcgi:start(),
+%%    Pid ! {overall, self(), CGIParams, has_body(Http), Body},
+%%    Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
+%%    Ret = ret(),
+%%    sgi:ct(Timer),
+%%    sgi_fcgi:stop(Pid),
+
     RetH = get_response_headers(),
     set_header_to_cowboy(RetH, 0),
     terminate(),
     %% @todo Return headers from cgi because cowboy don't give access to resp_headers
-    {iolist_to_binary(Ret), wf:state(status), RetH}.
+    {Ret, wf:state(status), RetH}.
+%%    {iolist_to_binary(Ret), wf:state(status), RetH}.
 
+do_send(CGIParams, HasBody, Body) ->
+    {ok, Pid} = sgi_fcgi:start(),
+    Pid ! {overall, self(), CGIParams, HasBody, Body},
+    Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
+    Ret = ret(),
+    sgi:ct(Timer),
+    sgi_fcgi:stop(Pid),
+    iolist_to_binary(Ret).
 
 %% ===========================================================
 %% Prepare Request
@@ -331,13 +348,15 @@ ret() ->
             [];
         {sgi_fcgi_return_error, Err} ->
             wf:error(?MODULE, "Connection error ~p~n", [Err]),
-            set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
+            update_response_headers([{<<"retry-after">>, <<"3600">>}], true),
+%%            set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
             wf:state(status, 503),
             [];
         {sgi_fcgi_timeout, Pid} ->
             sgi_fcgi:stop(Pid),
             wf:error(?MODULE, "Connect timeout to FastCGI ~n", []),
-            set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
+            update_response_headers([{<<"retry-after">>, <<"3600">>}], true),
+%%            set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
             wf:state(status, 503),
             []
     end.
