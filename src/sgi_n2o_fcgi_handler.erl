@@ -40,21 +40,13 @@ send(Http) ->
     {_, Body} = bs(Http),
     CGIParams = get_params(Http),
 
-    Ret = case sgi_cluster:is_use() of
+    {RetH, Ret} = case sgi_cluster:is_use() of
         true ->
             sgi_cluster:send(sgi_n2o_fcgi_handler, do_send, [CGIParams, has_body(Http), Body]);
         _ ->
             do_send(CGIParams, has_body(Http), Body)
     end,
 
-%%    {ok, Pid} = sgi_fcgi:start(),
-%%    Pid ! {overall, self(), CGIParams, has_body(Http), Body},
-%%    Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
-%%    Ret = ret(),
-%%    sgi:ct(Timer),
-%%    sgi_fcgi:stop(Pid),
-
-    RetH = get_response_headers(),
     set_header_to_cowboy(RetH, 0),
     terminate(),
     %% @todo Return headers from cgi because cowboy don't give access to resp_headers
@@ -63,12 +55,13 @@ send(Http) ->
 
 do_send(CGIParams, HasBody, Body) ->
     {ok, Pid} = sgi_fcgi:start(),
-    Pid ! {overall, self(), CGIParams, HasBody, Body},
     Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_fcgi_timeout, Pid}),
+    Pid ! {overall, self(), CGIParams, HasBody, Body},
     Ret = ret(),
+    RetH = get_response_headers(),
     sgi:ct(Timer),
     sgi_fcgi:stop(Pid),
-    iolist_to_binary(Ret).
+    {RetH, iolist_to_binary(Ret)}.
 
 %% ===========================================================
 %% Prepare Request
@@ -79,8 +72,8 @@ vhosts() ->
     Vs = wf:config(sgi, vhosts, []),
     vhosts(Vs).
 vhosts([H|T]) ->
-    S = sgi:pv(server_name, H, ""),
-    A = sgi:pv(aliase, H, ""),
+    S = sgi:mv(server_name, H, ""),
+    A = sgi:mv(alias, H, ""),
     case wf:to_list(host()) of
         Host when Host =:= S orelse Host =:= A ->
             wf:state(vhost, H), ok;
@@ -93,7 +86,7 @@ vhosts([]) -> wf:state(vhost, []), ok.
 vhost(Key) -> vhost(Key, "").
 -spec vhost(atom(), []) -> term().
 vhost(Key, Def) ->
-    sgi:pv(Key, wf:state(vhost), Def).
+    sgi:mv(Key, wf:state(vhost), Def).
 
 -spec get_params(http()) -> list().
 get_params(Http) ->
@@ -378,10 +371,12 @@ update_response_headers(Hs, Status) ->
     Status1 = case RespH1#response_headers.ended of true -> true; _ -> Status end,
     RespH2 = RespH1#response_headers{buff = lists:append([Hs, RespH1#response_headers.buff]), ended = Status1},
     wf:state(sgi_n2o_fcgi_response_headers, RespH2).
+
 get_response_headers() ->
     case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> []; H -> lists:reverse(H#response_headers.buff) end.
 get_response_headers_ended() ->
     case wf:state(sgi_n2o_fcgi_response_headers) of undefined -> false; H -> H#response_headers.ended end.
+
 get_response_header(K) ->
     sgi:pv(K, get_response_headers(), <<>>).
 

@@ -10,12 +10,15 @@
 
 %% @private
 %% @doc Checking or Processor or Memory overload, considering available waiting connections.
+%% Server is overloaded but
 is_critical() ->
-    true.
-%%    is_overload() andalso conn_load() < 80.
+%%    true.
+    is_overload() andalso conn_load() < 80.
 
+%% @doc Resources of server close to end.
 is_overload() ->
-    cpu_load(5) > 90 orelse mem_load() > 90.
+%%    true.
+    cpu_load(5) > 80 orelse mem_load() > 80.
 
 cpu_load() ->
     cpu_load(1).
