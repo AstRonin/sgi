@@ -281,7 +281,7 @@ check_multiplex() ->
             MPXS1 = case lists:keyfind(wf:to_binary(?FCGI_MPXS_CONNS), 1, Ret) of
                 {_, <<"0">>} -> ?FCGI_MULTIPLEXED_NO;
                 {_, <<"1">>} -> ?FCGI_MULTIPLEXED_YES;
-                _ -> ?FCGI_MULTIPLEXED_UNKNOWN
+                _ -> ?FCGI_MULTIPLEXED_NO
             end,
             application:set_env(sgi, multiplexed, MPXS1);
         _ -> ok

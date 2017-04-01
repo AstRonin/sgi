@@ -39,17 +39,28 @@ send(Http) ->
     {_, Body} = bs(Http),
     CGIParams = get_params(Http),
 
-    {ok, Pid} = sgi_uwsgi:start(),
-    Pid ! {overall, self(), CGIParams, has_body(Http), Body},
-    Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_uwsgi_timeout, Pid}),
-    Ret = ret(),
-    sgi:ct(Timer),
-    sgi_uwsgi:stop(Pid),
-    RetH = get_response_headers(),
+    {RetH, Ret} = case sgi_cluster:is_use() of
+        true ->
+            sgi_cluster:send(sgi_n2o_uwsgi_handler, do_send, [CGIParams, has_body(Http), Body]);
+        _ ->
+            do_send(CGIParams, has_body(Http), Body)
+    end,
+
     set_header_to_cowboy(RetH, 0),
     terminate(),
     %% @todo Return headers from cgi because cowboy don't give access to resp_headers
-    {iolist_to_binary(Ret), wf:state(status), RetH}.
+    {Ret, wf:state(status), RetH}.
+
+do_send(CGIParams, HasBody, Body) ->
+    {ok, Pid} = sgi_uwsgi:start(),
+    Timer = erlang:send_after(wf:config(sgi, response_timeout, ?DEF_TIMEOUT), self(), {sgi_uwsgi_timeout, Pid}),
+    Pid ! {overall, self(), CGIParams, HasBody, Body},
+    Ret = ret(),
+    RetH = get_response_headers(),
+    sgi:ct(Timer),
+    sgi_uwsgi:stop(Pid),
+    {RetH, iolist_to_binary(Ret)}.
+
 
 
 %% ===========================================================
@@ -61,8 +72,8 @@ vhosts() ->
     Vs = wf:config(sgi, vhosts, []),
     vhosts(Vs).
 vhosts([H|T]) ->
-    S = sgi:pv(server_name, H, ""),
-    A = sgi:pv(aliase, H, ""),
+    S = sgi:mv(server_name, H, ""),
+    A = sgi:mv(alias, H, ""),
     case wf:to_list(host()) of
         Host when Host =:= S orelse Host =:= A ->
             wf:state(vhost, H), ok;
@@ -75,7 +86,7 @@ vhosts([]) -> wf:state(vhost, []), ok.
 vhost(Key) -> vhost(Key, "").
 -spec vhost(atom(), []) -> term().
 vhost(Key, Def) ->
-    sgi:pv(Key, wf:state(vhost), Def).
+    sgi:mv(Key, wf:state(vhost), Def).
 
 -spec get_params(http()) -> list().
 get_params(Http) ->
@@ -335,13 +346,15 @@ ret() ->
                     stdout(Out);
                 {sgi_uwsgi_return_error, Err} ->
                     wf:error(?MODULE, "Connection error ~p~n", [Err]),
-                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
+                    update_response_headers([{<<"retry-after">>, <<"3600">>}], true),
+%%                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
                     wf:state(status, 503),
                     [];
                 {sgi_uwsgi_timeout, Pid} ->
                     sgi_uwsgi:stop(Pid),
-                    wf:error(?MODULE, "Connect timeout to FastCGI ~n", []),
-                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
+                    wf:error(?MODULE, "Connect timeout to uwsgi ~n", []),
+                    update_response_headers([{<<"retry-after">>, <<"3600">>}], true),
+%%                    set_header_to_cowboy([{<<"retry-after">>, <<"3600">>}]),
                     wf:state(status, 503),
                     []
             end

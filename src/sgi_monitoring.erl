@@ -1,24 +1,46 @@
 -module(sgi_monitoring).
 
--export([cpu_load/0, mem_load/0, is_critical/0, save_stat/0, do_save_stat/0]).
+-export([cpu_load/0, mem_load/0, conn_load/0, is_critical/0, is_overload/0, save_stat/0, do_save_stat/0]).
 
 
 -define(MAX_FILE_SIZE, 10485760).
 -define(MAX_LOG_FILES, 2).
 -define(CPU_STAT, "stat/cpu_stat.log").
 -define(MEM_STAT, "stat/mem_stat.log").
+-define(CPU_OVER, sgi:mv(cpu_overload, wf:config(sgi, cluster, #{}), 80)).
+-define(MEM_OVER, sgi:mv(mem_overload, wf:config(sgi, cluster, #{}), 80)).
 
-is_critical() -> cpu_load() > 90 orelse mem_load() > 90.
+%% @private
+%% @doc Checking or Processor or Memory is overloaded, considering available waiting connections.
+is_critical() ->
+    is_overload() andalso conn_load() < 80.
+
+%% @doc Resources of server is closed to the end.
+is_overload() ->
+    cpu_load(5) > ?CPU_OVER orelse mem_load() > ?MEM_OVER.
 
 cpu_load() ->
+    cpu_load(1).
+
+-spec cpu_load(N) -> Result when
+    N :: 1 | 5 | 15,
+    Result :: non_neg_integer().
+cpu_load(N) ->
+    Load = case N of
+        5 -> cpu_sup:avg5();
+        15 -> cpu_sup:avg15();
+        _ -> cpu_sup:avg1()
+    end,
     D = 50,
-    Load = cpu_sup:avg1(),
     100 * (1 - D/(D + Load)).
 
 mem_load() ->
     Ma = mem_allocated(),
     Mt = sgi:pv(total_memory, memsup:get_system_memory_data(), 0),
     Ma / Mt * 100.
+
+conn_load() ->
+    (sgi_arbiter:allocated_conn_count() / sgi_arbiter:total_conn_count()) * 100.
 
 mem_allocated() ->
     lists:foldl(fun({_,X}, Sum) -> X + Sum end, 0, erlang:memory()).
@@ -31,8 +53,7 @@ do_save_stat() ->
     archive_log(?CPU_STAT),
     archive_log(?MEM_STAT),
     Cpu = cpu_load(),
-    Mem = mem_allocated(),
-%%    Mem = mem_load(),
+    Mem = mem_load(),
     file:write_file(?CPU_STAT, <<(wf:to_binary(Cpu))/binary, "\n">>, [append]),
     file:write_file(?MEM_STAT, <<(wf:to_binary(Mem))/binary, "\n">>, [append]),
     timer:sleep(60000),
