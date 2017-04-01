@@ -7,18 +7,17 @@
 -define(MAX_LOG_FILES, 2).
 -define(CPU_STAT, "stat/cpu_stat.log").
 -define(MEM_STAT, "stat/mem_stat.log").
+-define(CPU_OVER, sgi:mv(cpu_overload, wf:config(sgi, cluster, #{}), 80)).
+-define(MEM_OVER, sgi:mv(mem_overload, wf:config(sgi, cluster, #{}), 80)).
 
 %% @private
-%% @doc Checking or Processor or Memory overload, considering available waiting connections.
-%% Server is overloaded but
+%% @doc Checking or Processor or Memory is overloaded, considering available waiting connections.
 is_critical() ->
-%%    true.
     is_overload() andalso conn_load() < 80.
 
-%% @doc Resources of server close to end.
+%% @doc Resources of server is closed to the end.
 is_overload() ->
-%%    true.
-    cpu_load(5) > 80 orelse mem_load() > 80.
+    cpu_load(5) > ?CPU_OVER orelse mem_load() > ?MEM_OVER.
 
 cpu_load() ->
     cpu_load(1).

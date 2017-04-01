@@ -1,6 +1,6 @@
 {application, sgi, [
     {description, "Socket Gateway Interface"},
-    {vsn, "0.7.0"},
+    {vsn, "0.8.0"},
     {registered, [sgi_arbiter, sgi_multiplexer, sgi_sup]},
     {modules, []},
     {applications, [kernel, stdlib, sasl, os_mon, n2o]},

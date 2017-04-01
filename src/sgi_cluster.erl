@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, node_info/0, is_ready/0, send/3, is_use/0, is_overloaded/0, info/0]).
+-export([start_link/0, nodes_info/0, is_ready/0, send/3, is_use/0, is_overloaded/0, info/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -13,6 +13,7 @@
     code_change/3]).
 
 -define(SERVER, ?MODULE).
+-define(RT, sgi:mv(response_timeout, wf:config(sgi, cluster, #{}), 600000)). % 10 minutes
 
 %% Sample of structure of State
 %% #{
@@ -26,39 +27,49 @@
 %%% API
 %%%===================================================================
 
+%% @doc Return true if cluster should be use
 is_use() ->
     case wf:config(sgi, cluster, false) of false -> false; _ -> true end.
 
-node_info() ->
-    gen_server:call(?SERVER, node_info).
+-spec nodes_info() -> NodesInfo when
+    NodesInfo :: term(). %% Information about nodes of cluster
+nodes_info() ->
+    gen_server:call(?SERVER, nodes_info).
 
+%% @doc Return state of genserver
+-spec info() -> State when
+    State :: term().
 info() ->
     gen_server:call(?SERVER, info).
 
+%% @doc Send request to available node or to self
 -spec send(M :: atom(), F :: atom(), A :: []) -> Return :: term().
 send(M, F, A) ->
     case is_overloaded() of
         true ->
             wf:info(?MODULE, "Try call to cluster", []),
             Key = rpc:async_call(idle_node(), M, F, A),
-            case rpc:nb_yield(Key, rt()) of
-                {value, Val} -> Val;
-                timeout -> <<>>
+            case rpc:nb_yield(Key, ?RT) of
+                {value, Val} ->
+                    Val;
+                timeout ->
+                    erlang:throw(timeout)
             end;
         _ ->
-            wf:info(?MODULE, "Have no availeble nodes, calling self node", []),
             erlang:apply(M, F, A)
     end.
-
+%% @doc Return true if genserver started and available
 is_ready() ->
     case whereis(?SERVER) of
         undefined -> false;
         _ -> true
     end.
 
+%% @doc Return true if server is overloaded
 is_overloaded() ->
     gen_server:call(?SERVER, is_overloaded).
 
+%% @doc Search not everloaded node and selected it for execute a request
 idle_node() ->
     gen_server:call(?SERVER, idle_node).
 
@@ -69,17 +80,20 @@ start_link() ->
 %%% gen_server callbacks
 %%%===================================================================
 
+
 init([]) ->
     check_node(),
     M = check_nodes(),
     self() ! collect_load_info,
     {ok, #state{nodes = M, self = #node_info{name = node()}}}.
 
+
 %%-------------------------------------------------------------------
 %% Handle Call
 %%-------------------------------------------------------------------
 
-handle_call(node_info, _From, State) ->
+
+handle_call(nodes_info, _From, State) ->
     {reply, State#state.nodes, State};
 
 handle_call(info, _From, State) ->
@@ -97,16 +111,20 @@ handle_call(idle_node, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
+
 %%-------------------------------------------------------------------
 %% Handle Cast
 %%-------------------------------------------------------------------
 
+
 handle_cast(_Request, State) ->
     {noreply, State}.
+
 
 %%-------------------------------------------------------------------
 %% Handle Info
 %%-------------------------------------------------------------------
+
 
 %% @doc Request to other nodes.
 handle_info({From, is_overload}, State) ->
@@ -118,7 +136,6 @@ handle_info(collect_load_info, State) ->
     SI = sgi:mv(syncr_interval, wf:config(sgi, cluster, #{}), 60000),
     spawn(fun() ->
         {ok, TRef} = timer:kill_after(SI - 5000), % kill current process because will soon open new the same.
-        wf:info(?MODULE, "Send is_overload request to cluster", []),
         R = rpc:multi_server_call(nodes(), sgi_cluster, is_overload),
         wf:info(?MODULE, "Recieve claster info: ~p~n", [R]),
         timer:cancel(TRef),
@@ -139,7 +156,9 @@ handle_info({collect_load_info_result, R}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
+
 %%-------------------------------------------------------------------
+
 
 terminate(_Reason, _State) ->
     ok.
@@ -147,9 +166,11 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
 
 -spec cluster_info_response(Response, State) -> State1 when
     Response :: {Replies, BadNodes} | Replies | BadNodes | [],
@@ -165,8 +186,7 @@ cluster_info_response({[], []}, State) ->
     State#state{nodes = #{}};
 cluster_info_response({Replies, BadNodes}, State) ->
     State1 = cluster_info_response(Replies, State),
-    State2 = cluster_info_response(BadNodes, State1),
-    State2;
+    cluster_info_response(BadNodes, State1);
 cluster_info_response([H | T], State) ->
     NodeName = response_node_name(H),
     {RecordInfo, M} =
@@ -191,6 +211,7 @@ cluster_info_response([H | T], State) ->
 response_node_name({ok, N, _}) -> N;
 response_node_name(N) -> N.
 
+
 %% Check node and change if needed. Don't forget run `epmd -daemon`
 check_node() ->
     case erlang:node() =:= nonode@nohost of
@@ -199,6 +220,7 @@ check_node() ->
         _ ->
             ok
     end.
+
 
 -spec check_nodes() -> Map when
     Map :: #{node() => #node_info{}} | #{}.
@@ -211,6 +233,7 @@ check_nodes([], M) ->
 check_nodes([NodeName | T], M) ->
     M1 = maps:put(NodeName, #node_info{name = NodeName}, M),
     check_nodes(T, M1).
+
 
 -spec do_idle_node(State :: #state{}) -> {ok, NodeName, Index} when
     NodeName :: list(),
@@ -226,17 +249,15 @@ do_idle_node(State) ->
     SelfI :: non_neg_integer(). % Current index for avoid cycle and search only in one circle
 do_idle_node([], _I, _) ->
     {ok, node(), 0};
-%%do_idle_node([{NodeInfo}], _I, _SelfI) -> %% using for performance trick if we have only one helped node in our cluster
-%%    case NodeInfo of
-%%        NodeInfo when NodeInfo#node_info.available, not NodeInfo#node_info.overloaded ->
-%%            {ok, NodeInfo#node_info.name, 1};
-%%        _ ->
-%%            {ok, node(), 0}
-%%    end;
+do_idle_node([NodeInfo], _I, _SelfI) -> %% using for performance trick if we have only one helped node in our cluster
+    case NodeInfo of
+        NodeInfo when NodeInfo#node_info.available, not NodeInfo#node_info.overloaded ->
+            {ok, NodeInfo#node_info.name, 1};
+        _ ->
+            {ok, node(), 0}
+    end;
 do_idle_node(L, I, SelfI) ->
     try
-        wf:info(?MODULE, "List of nodes: ~p~n", [L]),
-        wf:info(?MODULE, "SelfI: ~p~n", [SelfI]),
         case lists:nth(I, L) of
             NodeInfo when NodeInfo#node_info.available, not NodeInfo#node_info.overloaded ->
                 {ok, NodeInfo#node_info.name, I};
@@ -257,9 +278,6 @@ do_idle_node(L, I, SelfI) ->
                     do_idle_node(L, 1, SelfI) % 1 - is first element in array
             end
     end.
-
-rt() ->
-    sgi:mv(response_timeout, wf:config(sgi, cluster, #{}), 600000). % 10 minutes
 
 unix_time() ->
     erlang:system_time(seconds).

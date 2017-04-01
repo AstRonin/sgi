@@ -24,6 +24,14 @@ and you can send message, for example through the [Tor](https://torproject.org/)
    
 - Erlang 18.1+
 
+## Documentation
+
+Read documentation in [Wiki](https://github.com/AstRonin/sgi/wiki).
+
+## Upgrade
+
+Read [UPGRADE](https://github.com/AstRonin/sgi/blob/master/UPGRADE.md) before installation new version.
+
 ## Try Samples
 
 ### Sample 1 - Add a content from other languages inside of your Site.

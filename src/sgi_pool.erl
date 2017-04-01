@@ -45,10 +45,8 @@ start_link(Name) ->
 start_link(Name, Conf) ->
     gen_server:start_link(?MODULE, [Name, Conf], []).
 
-%%
-%% Simple and small request.
+%% @doc Simple and small request.
 %% Send request to a server, receive only one response, and free a socket
-%%
 -spec once_call(binary()) -> {ok, binary()} | {error, term()}.
 once_call(Request) ->
     case ?ARBITER:alloc() of
@@ -75,28 +73,19 @@ once_call(PoolPid, Request) ->
             {error, Reason}
     end.
 
-%%
-%% Getting settings of this connection for control
-%%
+%% @doc Getting settings of this connection for control
 settings(Pid) ->
     gen_server:call(Pid, get_settings).
 
-%%
-%% Checking connect to a server
-%%
+%% @doc Checking connect to a server
 try_connect(Pid) ->
     gen_server:call(Pid, try_connect).
 
-%%-spec jsend(binary()) -> {ok, binary()} | {error, term()}.
-%%jsend(Request) ->
-%%    {ok, PoolPid} = ?ARBITER:alloc(),
-%%    Ret = gen_server:call(PoolPid, {jsend, Request}),
-%%    ?ARBITER:free(PoolPid),
-%%    Ret.
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
+
 
 init([_Name, Conf]) ->
     timer:send_interval(?HIBERNATE_AFTER, self(), hibernate),
@@ -109,6 +98,12 @@ init([_Name, Conf]) ->
         failed_timeout = sgi:mv(failed_timeout, Conf, 1), % in seconds
         timeout        = sgi:mv(timeout, Conf, 30000)
     }}.
+
+
+%%-------------------------------------------------------------------
+%% Handle Call
+%%-------------------------------------------------------------------
+
 
 handle_call({once, Request}, _From, State) ->
     case connect(State, false) of
@@ -124,28 +119,36 @@ handle_call({once, Request}, _From, State) ->
             wf:error(?MODULE, "Can't create Socket: ~p~n", [Reason]),
             {reply, {error, Reason}, set_last_active_time(State1)}
     end;
+
 handle_call(get_settings, _From, State) ->
     M = #{weight => State#state.weight, server_name => State#state.server_name},
     {reply, {ok, M}, State};
+
 handle_call(try_connect, _From, State) ->
     case connect(State) of
         {ok, State1} -> {reply, ok, State1};
         {error, _Reason, State1} -> {reply, error, State1}
     end;
-%%handle_call({jsend, Request}, _From, State) ->
-%%    {ok, State1} = connect(State, false),
-%%    ok = gen_tcp:send(State1#state.socket, Request),
-%%    Ret = do_recv(State1, []),
-%%    State2 = close(State1),
-%%    {reply, Ret, State2};
+
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
+
+%%-------------------------------------------------------------------
+%% Handle Cast
+%%-------------------------------------------------------------------
+
+
 handle_cast(_Request, State) ->
     {noreply, State}.
-%%
-%% Send msg
-%%
+
+
+%%-------------------------------------------------------------------
+%% Handle Info
+%%-------------------------------------------------------------------
+
+
+%% @doc Send msg by TCP to client
 handle_info({send, Request, From}, State) ->
     State1 = State#state{from = From},
     case connect(State1) of
@@ -165,27 +168,23 @@ handle_info({send, Request, From}, State) ->
             {noreply, set_last_active_time(State2)}
     end;
 
-%%
-%% Receive msg
-%%
+%% @doc Receive msg from client and forward to waiting process
 handle_info({tcp, Socket, Data}, State) ->
     State#state.from ! {socket_return, Data},
     inet:setopts(Socket, [{active, once}]),
     {noreply, set_last_active_time(State)};
 
-%%
-%% Receive msg about connection was closed
-%%
+%% @doc Receive msg that connection closed
 handle_info({tcp_closed, _Socket}, State) ->
 %%    wf:info(?MODULE, "TCP connection CLOSED with state: ~p~n", [State]),
     {noreply, set_last_active_time(State#state{socket = undefined})};
 
-%%
-%%  Receive msg about connection had errors
-%%
+%% @doc Receive msg that connection closed with errors
 handle_info({tcp_error, _Socket, Reason}, State) ->
     wf:info(?MODULE, "TCP connection got ERROR: ~p with state: ~p~n", [Reason, State]),
     {noreply, set_last_active_time(State#state{socket = undefined})};
+
+%% @doc Move process to hibernate after closing connection
 handle_info(hibernate, State) ->
     case sgi:time_now() > (State#state.last_active_time + ?HIBERNATE_AFTER) of
         true ->
@@ -195,21 +194,22 @@ handle_info(hibernate, State) ->
             {noreply, State}
     end;
 
-%%
-%% Close connection
-%%
+%% @doc Close connection
 handle_info(close, State) ->
     State1 = close(State),
     {noreply, set_last_active_time(State1)};
+
 handle_info(send_alive, State) -> % @todo it obtains overload if more than 1000 processes will send this message
     case sgi:is_alive(sgi_arbiter) of
         true -> sgi_arbiter:new_pool_started(self());
         _ -> wait
     end,
     {noreply, State};
+
 handle_info(Info, State) ->
     wf:error(?MODULE, "Unexpected message: ~p~n", [Info]),
     {noreply, set_last_active_time(State)}.
+
 
 terminate(_Reason, State) ->
     close(State),
@@ -217,18 +217,17 @@ terminate(_Reason, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
+
 connect(State) -> connect(State, once).
 
-%%
-%% Process is trying to connect to a server.
-%%
+%% @doc Process is trying to connect to a server.
 -spec connect(#state{}, tcp_active_type()) ->
     {ok, State :: #state{}} | {error, Reason :: term(), State :: #state{}}.
-
 connect(State = #state{socket = undefined, address = Address, port = Port}, Active) ->
 
     {Address1, Port1} =
@@ -300,9 +299,7 @@ do_recv(State, Bs) ->
             {error, Reason}
     end.
 
-%%
-%% Receive only one msg
-%%
+%% @doc Receive only one msg
 -spec do_recv_once(#state{}) -> {ok, term()} | {error, term()}.
 do_recv_once(State) ->
     case gen_tcp:recv(State#state.socket, 0) of
@@ -316,9 +313,7 @@ do_recv_once(State) ->
 set_last_active_time(State) ->
     State#state{last_active_time = sgi:time_now()}.
 
-%%
-%% Tell arbiter what connection is fail
-%%
+%% @doc Tell arbiter what connection is fail
 -spec overage_fail_conns(#state{}) -> #state{}.
 overage_fail_conns(State) ->
     case State#state.fails >= State#state.max_fails of

@@ -34,16 +34,20 @@ start_child(N) ->
     supervisor:start_child(?MODULE, #{id => N, start => {N, start_link, []}}).
 stop_child(Name) ->
     case supervisor:terminate_child(?MODULE, Name) of
-        ok -> supervisor:delete_child(?MODULE, Name);
-        Error -> Error
+        ok ->
+            supervisor:delete_child(?MODULE, Name);
+        Error ->
+            Error
     end.
 
 start_children() ->
     ok = start_pool_children(),
     ?SERVER:start_child(sgi_arbiter),
     case sgi_cluster:is_use() of
-        false -> skip;
-        _ -> ?SERVER:start_child(sgi_cluster)
+        false ->
+            skip;
+        _ ->
+            ?SERVER:start_child(sgi_cluster)
     end.
 
 %%%===================================================================
