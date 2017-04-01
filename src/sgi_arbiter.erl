@@ -165,9 +165,6 @@ handle_info(update_counts, State) ->
     State1 = update_counts(State),
     {noreply, State1};
 handle_info(add_pool, State) ->
-    State1 = State#state{adding_new_pool = 1},
-    {noreply, State1};
-handle_info(add_pool, State) ->
     State1 = case add_pool() of
         N when is_integer(N) andalso N > 0 ->
             T = erlang:send_after(100, self(), ch_to_state),
