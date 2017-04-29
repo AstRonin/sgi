@@ -11,9 +11,18 @@ It supports two protocols:
     This protocol is the native protocol used by the [uWSGI](https://uwsgi-docs.readthedocs.io) server.
     See 3-th sample for more details.
 
+#### Socket Client
+Includes **Balancer** and **Pool**, is an importent component of the app. It can connect to any number of servers. It is flexible and easily [configurable](https://github.com/AstRonin/sgi/wiki/Configuration).
+If server has down then Balancer will not send the requests and it some times will сheck server availability. 
+
+Balancer can open new connections as needed on the fly and starts with a small necessary quantity of connections. If some socket will not use some time then this socket will be closed freeing memory.
+
+Balancer has two balancing methods: **blurred** and **priority**. Please look to [Sample 4](https://github.com/AstRonin/sgi/blob/master/README.md#sample-4---part-of-socket-connection) to get an idea of the advantages of each. It will allow to configure Socket Client for different server architectures.
+
+#### Proxy
 Application be able to create connect through the proxy, now support SOCKS5 protocol, 
 and you can send message, for example through the [Tor](https://torproject.org/). 
-@see Configuration section.
+@see [Configuration](https://github.com/AstRonin/sgi/wiki/Configuration) section.
 
 ## Base components
 
